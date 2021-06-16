@@ -5,6 +5,7 @@ import { Vector2 } from "../Maths/math.vector";
 import { Camera } from "../Cameras/camera";
 import { Effect } from "../Materials/effect";
 import { Constants } from "../Engines/constants";
+import { RenderTargetCreationOptions } from "../Materials/Textures/renderTargetCreationOptions";
 import "../Shaders/postprocess.vertex";
 import { IInspectable } from '../Misc/iInspectable';
 import { Engine } from '../Engines/engine';
@@ -12,35 +13,53 @@ import { Color4 } from '../Maths/math.color';
 
 import "../Engines/Extensions/engine.renderTarget";
 import { NodeMaterial } from '../Materials/Node/nodeMaterial';
+import { serialize, serializeAsColor4, SerializationHelper } from '../Misc/decorators';
+import { _TypeStore } from '../Misc/typeStore';
+import { DrawWrapper } from "../Materials/drawWrapper";
+import { AbstractScene } from "../abstractScene";
 
 declare type Scene = import("../scene").Scene;
 declare type InternalTexture = import("../Materials/Textures/internalTexture").InternalTexture;
 declare type WebVRFreeCamera = import("../Cameras/VR/webVRCamera").WebVRFreeCamera;
 declare type Animation = import("../Animations/animation").Animation;
+declare type PrePassRenderer = import("../Rendering/prePassRenderer").PrePassRenderer;
+declare type PrePassEffectConfiguration = import("../Rendering/prePassEffectConfiguration").PrePassEffectConfiguration;
 
 /**
  * Size options for a post process
  */
 export type PostProcessOptions = { width: number, height: number };
 
+type TextureCache = {texture: InternalTexture, postProcessChannel: number, lastUsedRenderId : number};
+
 /**
  * PostProcess can be used to apply a shader to a texture after it has been rendered
  * See https://doc.babylonjs.com/how_to/how_to_use_postprocesses
  */
 export class PostProcess {
+    /** @hidden */
+    public _parentContainer: Nullable<AbstractScene> = null;
+
     /**
      * Gets or sets the unique id of the post process
      */
+    @serialize()
     public uniqueId: number;
+
+    /** Name of the PostProcess. */
+    @serialize()
+    public name: string;
 
     /**
     * Width of the texture to apply the post process on
     */
+    @serialize()
     public width = -1;
 
     /**
     * Height of the texture to apply the post process on
     */
+    @serialize()
     public height = -1;
 
     /**
@@ -57,23 +76,28 @@ export class PostProcess {
     * Sampling mode used by the shader
     * See https://doc.babylonjs.com/classes/3.1/texture
     */
+    @serialize()
     public renderTargetSamplingMode: number;
     /**
     * Clear color to use when screen clearing
     */
+    @serializeAsColor4()
     public clearColor: Color4;
     /**
     * If the buffer needs to be cleared before applying the post process. (default: true)
     * Should be set to false if shader will overwrite all previous pixels.
     */
+    @serialize()
     public autoClear = true;
     /**
     * Type of alpha mode to use when performing the post process (default: Engine.ALPHA_DISABLE)
     */
+    @serialize()
     public alphaMode = Constants.ALPHA_DISABLE;
     /**
     * Sets the setAlphaBlendConstants of the babylon engine
     */
+    @serialize()
     public alphaConstants: Color4;
     /**
     * Animations to be used for the post processing
@@ -84,11 +108,13 @@ export class PostProcess {
      * Enable Pixel Perfect mode where texture is not scaled to be power of 2.
      * Can only be used on a single postprocess or on the last one of a chain. (default: false)
      */
+    @serialize()
     public enablePixelPerfectMode = false;
 
     /**
      * Force the postprocess to be applied without taking in account viewport
      */
+    @serialize()
     public forceFullscreenViewport = true;
 
     /**
@@ -107,13 +133,17 @@ export class PostProcess {
      * | 3     | SCALEMODE_CEILING                   | [engine.scalemode_ceiling](https://doc.babylonjs.com/api/classes/babylon.engine#scalemode_ceiling) |
      *
      */
+    @serialize()
     public scaleMode = Constants.SCALEMODE_FLOOR;
     /**
     * Force textures to be a power of two (default: false)
     */
+    @serialize()
     public alwaysForcePOT = false;
 
+    @serialize("samples")
     private _samples = 1;
+
     /**
     * Number of sample textures (default: 1)
     */
@@ -134,6 +164,7 @@ export class PostProcess {
     /**
     * Modify the scale of the post process to be the same as the viewport (default: false)
     */
+    @serialize()
     public adaptScaleToCurrentViewport = false;
 
     private _camera: Camera;
@@ -142,6 +173,7 @@ export class PostProcess {
 
     private _options: number | PostProcessOptions;
     private _reusable = false;
+    private _renderId = 0;
     private _textureType: number;
     private _textureFormat: number;
     /**
@@ -150,20 +182,33 @@ export class PostProcess {
     */
     public _textures = new SmartArray<InternalTexture>(2);
     /**
+    * Smart array of input and output textures for the post process.
+    * @hidden
+    */
+    private _textureCache: TextureCache[] = [];
+    /**
     * The index in _textures that corresponds to the output texture.
     * @hidden
     */
     public _currentRenderTextureInd = 0;
-    private _effect: Effect;
+    private _drawWrapper: DrawWrapper;
     private _samplers: string[];
     private _fragmentUrl: string;
     private _vertexUrl: string;
     private _parameters: string[];
+    protected _postProcessDefines: Nullable<string>;
     private _scaleRatio = new Vector2(1, 1);
     protected _indexParameters: any;
     private _shareOutputWithPostProcess: Nullable<PostProcess>;
     private _texelSize = Vector2.Zero();
-    private _forcedOutputTexture: Nullable<InternalTexture>;
+    /** @hidden */
+    public _forcedOutputTexture: Nullable<InternalTexture>;
+
+    /**
+    * Prepass configuration in case this post process needs a texture from prepass
+    * @hidden
+    */
+    public _prePassEffectConfiguration: PrePassEffectConfiguration;
 
     /**
      * Returns the fragment url or shader name used in the post process.
@@ -274,7 +319,10 @@ export class PostProcess {
     * the only way to unset it is to use this function to restore its internal state
     */
     public restoreDefaultInputTexture() {
-        this._forcedOutputTexture = null;
+        if (this._forcedOutputTexture) {
+            this._forcedOutputTexture = null;
+            this.markTextureDirty();
+        }
     }
 
     /**
@@ -316,52 +364,54 @@ export class PostProcess {
      * @param textureType Type of textures used when performing the post process. (default: 0)
      * @param vertexUrl The url of the vertex shader to be used. (default: "postprocess")
      * @param indexParameters The index parameters to be used for babylons include syntax "#include<kernelBlurVaryingDeclaration>[0..varyingCount]". (default: undefined) See usage in babylon.blurPostProcess.ts and kernelBlur.vertex.fx
-     * @param blockCompilation If the shader should not be compiled imediatly. (default: false)
+     * @param blockCompilation If the shader should not be compiled immediatly. (default: false)
      * @param textureFormat Format of textures used when performing the post process. (default: TEXTUREFORMAT_RGBA)
      */
     constructor(
-        /** Name of the PostProcess. */
-        public name: string,
+        name: string,
         fragmentUrl: string, parameters: Nullable<string[]>, samplers: Nullable<string[]>, options: number | PostProcessOptions, camera: Nullable<Camera>,
         samplingMode: number = Constants.TEXTURE_NEAREST_SAMPLINGMODE, engine?: Engine, reusable?: boolean, defines: Nullable<string> = null, textureType: number = Constants.TEXTURETYPE_UNSIGNED_INT, vertexUrl: string = "postprocess",
         indexParameters?: any, blockCompilation = false, textureFormat = Constants.TEXTUREFORMAT_RGBA) {
-        if (camera != null) {
-            this._camera = camera;
-            this._scene = camera.getScene();
-            camera.attachPostProcess(this);
-            this._engine = this._scene.getEngine();
 
-            this._scene.postProcesses.push(this);
-            this.uniqueId = this._scene.getUniqueId();
-        }
-        else if (engine) {
-            this._engine = engine;
-            this._engine.postProcesses.push(this);
-        }
-        this._options = options;
-        this.renderTargetSamplingMode = samplingMode ? samplingMode : Constants.TEXTURE_NEAREST_SAMPLINGMODE;
-        this._reusable = reusable || false;
-        this._textureType = textureType;
-        this._textureFormat = textureFormat;
+            this.name = name;
+            if (camera != null) {
+                this._camera = camera;
+                this._scene = camera.getScene();
+                camera.attachPostProcess(this);
+                this._engine = this._scene.getEngine();
 
-        this._samplers = samplers || [];
-        this._samplers.push("textureSampler");
+                this._scene.postProcesses.push(this);
+                this.uniqueId = this._scene.getUniqueId();
+            }
+            else if (engine) {
+                this._engine = engine;
+                this._engine.postProcesses.push(this);
+            }
+            this._options = options;
+            this.renderTargetSamplingMode = samplingMode ? samplingMode : Constants.TEXTURE_NEAREST_SAMPLINGMODE;
+            this._reusable = reusable || false;
+            this._textureType = textureType;
+            this._textureFormat = textureFormat;
 
-        this._fragmentUrl = fragmentUrl;
-        this._vertexUrl = vertexUrl;
-        this._parameters = parameters || [];
+            this._samplers = samplers || [];
+            this._samplers.push("textureSampler");
 
-        this._parameters.push("scale");
+            this._fragmentUrl = fragmentUrl;
+            this._vertexUrl = vertexUrl;
+            this._parameters = parameters || [];
 
-        this._indexParameters = indexParameters;
+            this._parameters.push("scale");
 
-        if (!blockCompilation) {
-            this.updateEffect(defines);
-        }
+            this._indexParameters = indexParameters;
+            this._drawWrapper = new DrawWrapper(this._engine);
+
+            if (!blockCompilation) {
+                this.updateEffect(defines);
+            }
     }
 
     /**
-     * Gets a string idenfifying the name of the class
+     * Gets a string identifying the name of the class
      * @returns "PostProcess" string
      */
     public getClassName(): string {
@@ -381,7 +431,7 @@ export class PostProcess {
      * @returns The created effect corresponding the the postprocess.
      */
     public getEffect(): Effect {
-        return this._effect;
+        return this._drawWrapper.effect!;
     }
 
     /**
@@ -422,7 +472,8 @@ export class PostProcess {
      */
     public updateEffect(defines: Nullable<string> = null, uniforms: Nullable<string[]> = null, samplers: Nullable<string[]> = null, indexParameters?: any,
         onCompiled?: (effect: Effect) => void, onError?: (effect: Effect, errors: string) => void, vertexUrl?: string, fragmentUrl?: string) {
-        this._effect = this._engine.createEffect({ vertex: vertexUrl ?? this._vertexUrl, fragment: fragmentUrl ?? this._fragmentUrl },
+        this._postProcessDefines = defines;
+        this._drawWrapper.effect = this._engine.createEffect({ vertex: vertexUrl ?? this._vertexUrl, fragment: fragmentUrl ?? this._fragmentUrl },
             ["position"],
             uniforms || this._parameters,
             samplers || this._samplers,
@@ -445,6 +496,71 @@ export class PostProcess {
     /** invalidate frameBuffer to hint the postprocess to create a depth buffer */
     public markTextureDirty(): void {
         this.width = -1;
+    }
+
+    private _createRenderTargetTexture(textureSize: { width: number, height: number }, textureOptions: RenderTargetCreationOptions, channel = 0) {
+        for (let i = 0; i < this._textureCache.length; i++) {
+            if (this._textureCache[i].texture.width === textureSize.width &&
+                this._textureCache[i].texture.height === textureSize.height &&
+                this._textureCache[i].postProcessChannel === channel) {
+                return this._textureCache[i].texture;
+            }
+        }
+
+        const tex = this._engine.createRenderTargetTexture(textureSize, textureOptions);
+        this._textureCache.push({ texture: tex, postProcessChannel: channel, lastUsedRenderId : -1 });
+
+        return tex;
+    }
+
+    private _flushTextureCache() {
+        const currentRenderId = this._renderId;
+
+        for (let i = this._textureCache.length - 1; i >= 0; i--) {
+            if (currentRenderId - this._textureCache[i].lastUsedRenderId > 100) {
+                let currentlyUsed = false;
+                for (var j = 0; j < this._textures.length; j++) {
+                    if (this._textures.data[j] === this._textureCache[i].texture) {
+                        currentlyUsed = true;
+                        break;
+                    }
+                }
+
+                if (!currentlyUsed) {
+                    this._engine._releaseTexture(this._textureCache[i].texture);
+                    this._textureCache.splice(i, 1);
+                }
+            }
+        }
+    }
+
+    private _resize(width: number, height: number, camera: Camera, needMipMaps: boolean, forceDepthStencil?: boolean) {
+        if (this._textures.length > 0) {
+            this._textures.reset();
+        }
+
+        this.width = width;
+        this.height = height;
+
+        let textureSize = { width: this.width, height: this.height };
+        let textureOptions = {
+            generateMipMaps: needMipMaps,
+            generateDepthBuffer: forceDepthStencil || camera._postProcesses.indexOf(this) === 0,
+            generateStencilBuffer: (forceDepthStencil || camera._postProcesses.indexOf(this) === 0) && this._engine.isStencilEnable,
+            samplingMode: this.renderTargetSamplingMode,
+            type: this._textureType,
+            format: this._textureFormat
+        };
+
+        this._textures.push(this._createRenderTargetTexture(textureSize, textureOptions, 0));
+
+        if (this._reusable) {
+            this._textures.push(this._createRenderTargetTexture(textureSize, textureOptions, 1));
+        }
+
+        this._texelSize.copyFromFloats(1.0 / this.width, 1.0 / this.height);
+
+        this.onSizeChangedObservable.notifyObservers(this);
     }
 
     /**
@@ -501,34 +617,7 @@ export class PostProcess {
             }
 
             if (this.width !== desiredWidth || this.height !== desiredHeight) {
-                if (this._textures.length > 0) {
-                    for (var i = 0; i < this._textures.length; i++) {
-                        this._engine._releaseTexture(this._textures.data[i]);
-                    }
-                    this._textures.reset();
-                }
-                this.width = desiredWidth;
-                this.height = desiredHeight;
-
-                let textureSize = { width: this.width, height: this.height };
-                let textureOptions = {
-                    generateMipMaps: needMipMaps,
-                    generateDepthBuffer: forceDepthStencil || camera._postProcesses.indexOf(this) === 0,
-                    generateStencilBuffer: (forceDepthStencil || camera._postProcesses.indexOf(this) === 0) && this._engine.isStencilEnable,
-                    samplingMode: this.renderTargetSamplingMode,
-                    type: this._textureType,
-                    format: this._textureFormat
-                };
-
-                this._textures.push(this._engine.createRenderTargetTexture(textureSize, textureOptions));
-
-                if (this._reusable) {
-                    this._textures.push(this._engine.createRenderTargetTexture(textureSize, textureOptions));
-                }
-
-                this._texelSize.copyFromFloats(1.0 / this.width, 1.0 / this.height);
-
-                this.onSizeChangedObservable.notifyObservers(this);
+                this._resize(desiredWidth, desiredHeight, camera, needMipMaps, forceDepthStencil);
             }
 
             this._textures.forEach((texture) => {
@@ -536,6 +625,9 @@ export class PostProcess {
                     this._engine.updateRenderTargetTextureSampleCount(texture, this.samples);
                 }
             });
+
+            this._flushTextureCache();
+            this._renderId++;
         }
 
         var target: InternalTexture;
@@ -549,6 +641,18 @@ export class PostProcess {
             this.height = this._forcedOutputTexture.height;
         } else {
             target = this.inputTexture;
+
+            let cache;
+            for (let i = 0; i < this._textureCache.length; i++) {
+                if (this._textureCache[i].texture === target) {
+                    cache = this._textureCache[i];
+                    break;
+                }
+            }
+
+            if (cache) {
+                cache.lastUsedRenderId = this._renderId;
+            }
         }
 
         // Bind the input of this post process to be used as the output of the previous post process.
@@ -560,6 +664,8 @@ export class PostProcess {
             this._scaleRatio.copyFromFloats(1, 1);
             this._engine.bindFramebuffer(target, 0, undefined, undefined, this.forceFullscreenViewport);
         }
+
+        this._engine._debugInsertMarker?.(`post process ${this.name} input`);
 
         this.onActivateObservable.notifyObservers(camera);
 
@@ -578,7 +684,7 @@ export class PostProcess {
      * If the post process is supported.
      */
     public get isSupported(): boolean {
-        return this._effect.isSupported;
+        return this._drawWrapper.effect!.isSupported;
     }
 
     /**
@@ -600,7 +706,7 @@ export class PostProcess {
      * @returns true if the post-process is ready (shader is compiled)
      */
     public isReady(): boolean {
-        return this._effect && this._effect.isReady();
+        return this._drawWrapper.effect?.isReady() ?? false;
     }
 
     /**
@@ -609,12 +715,12 @@ export class PostProcess {
      */
     public apply(): Nullable<Effect> {
         // Check
-        if (!this._effect || !this._effect.isReady()) {
+        if (!this._drawWrapper.effect?.isReady()) {
             return null;
         }
 
         // States
-        this._engine.enableEffect(this._effect);
+        this._engine.enableEffect(this._drawWrapper);
         this._engine.setState(false);
         this._engine.setDepthBuffer(false);
         this._engine.setDepthWrite(false);
@@ -634,26 +740,47 @@ export class PostProcess {
         } else {
             source = this.inputTexture;
         }
-        this._effect._bindTexture("textureSampler", source);
+
+        this._drawWrapper.effect._bindTexture("textureSampler", source);
 
         // Parameters
-        this._effect.setVector2("scale", this._scaleRatio);
-        this.onApplyObservable.notifyObservers(this._effect);
+        this._drawWrapper.effect.setVector2("scale", this._scaleRatio);
+        this.onApplyObservable.notifyObservers(this._drawWrapper.effect);
 
-        return this._effect;
+        return this._drawWrapper.effect;
     }
 
     private _disposeTextures() {
         if (this._shareOutputWithPostProcess || this._forcedOutputTexture) {
+            this._disposeTextureCache();
             return;
         }
 
-        if (this._textures.length > 0) {
-            for (var i = 0; i < this._textures.length; i++) {
-                this._engine._releaseTexture(this._textures.data[i]);
-            }
-        }
+        this._disposeTextureCache();
         this._textures.dispose();
+    }
+
+    private _disposeTextureCache() {
+        for (let i = this._textureCache.length - 1; i >= 0; i--) {
+            this._engine._releaseTexture(this._textureCache[i].texture);
+        }
+
+        this._textureCache.length = 0;
+    }
+
+    /**
+     * Sets the required values to the prepass renderer.
+     * @param prePassRenderer defines the prepass renderer to setup.
+     * @returns true if the pre pass is needed.
+     */
+    public setPrePassRenderer(prePassRenderer: PrePassRenderer): boolean {
+        if (this._prePassEffectConfiguration) {
+            this._prePassEffectConfiguration = prePassRenderer.addEffectConfiguration(this._prePassEffectConfiguration);
+            this._prePassEffectConfiguration.enabled = true;
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -671,6 +798,14 @@ export class PostProcess {
             if (index !== -1) {
                 this._scene.postProcesses.splice(index, 1);
             }
+        }
+
+        if (this._parentContainer) {
+            const index = this._parentContainer.postProcesses.indexOf(this);
+            if (index > -1) {
+                this._parentContainer.postProcesses.splice(index, 1);
+            }
+            this._parentContainer = null;
         }
 
         index = this._engine.postProcesses.indexOf(this);
@@ -697,4 +832,96 @@ export class PostProcess {
         this.onBeforeRenderObservable.clear();
         this.onSizeChangedObservable.clear();
     }
+
+    /**
+     * Serializes the particle system to a JSON object
+     * @returns the JSON object
+     */
+    public serialize(): any {
+        var serializationObject = SerializationHelper.Serialize(this);
+        var camera = this.getCamera() || this._scene && this._scene.activeCamera;
+        serializationObject.customType = "BABYLON." + this.getClassName();
+        serializationObject.cameraId = camera ? camera.id : null;
+        serializationObject.reusable = this._reusable;
+        serializationObject.textureType = this._textureType;
+        serializationObject.fragmentUrl = this._fragmentUrl;
+        serializationObject.parameters = this._parameters;
+        serializationObject.samplers = this._samplers;
+        serializationObject.options = this._options;
+        serializationObject.defines = this._postProcessDefines;
+        serializationObject.textureFormat = this._textureFormat;
+        serializationObject.vertexUrl = this._vertexUrl;
+        serializationObject.indexParameters = this._indexParameters;
+
+        return serializationObject;
+    }
+
+    /**
+     * Clones this post process
+     * @returns a new post process similar to this one
+     */
+    public clone(): Nullable<PostProcess> {
+        const serializationObject = this.serialize();
+        serializationObject._engine = this._engine;
+        serializationObject.cameraId = null;
+
+        const result = PostProcess.Parse(serializationObject, this._scene, "");
+
+        if (!result) {
+            return null;
+        }
+
+        result.onActivateObservable = this.onActivateObservable.clone();
+        result.onSizeChangedObservable = this.onSizeChangedObservable.clone();
+        result.onApplyObservable = this.onApplyObservable.clone();
+        result.onBeforeRenderObservable = this.onBeforeRenderObservable.clone();
+        result.onAfterRenderObservable = this.onAfterRenderObservable.clone();
+
+        result._prePassEffectConfiguration = this._prePassEffectConfiguration;
+
+        return result;
+    }
+
+    /**
+     * Creates a material from parsed material data
+     * @param parsedPostProcess defines parsed post process data
+     * @param scene defines the hosting scene
+     * @param rootUrl defines the root URL to use to load textures
+     * @returns a new post process
+     */
+    public static Parse(parsedPostProcess: any, scene: Scene, rootUrl: string): Nullable<PostProcess> {
+        var postProcessType = _TypeStore.GetClass(parsedPostProcess.customType);
+
+        if (!postProcessType || !postProcessType._Parse) {
+            return null;
+        }
+
+        var camera = scene ? scene.getCameraById(parsedPostProcess.cameraId) : null;
+        return postProcessType._Parse(parsedPostProcess, camera, scene, rootUrl);
+    }
+
+    /** @hidden */
+    public static _Parse(parsedPostProcess: any, targetCamera: Camera, scene: Scene, rootUrl: string) : Nullable<PostProcess> {
+        return SerializationHelper.Parse(() => {
+            return new PostProcess(
+                parsedPostProcess.name,
+                parsedPostProcess.fragmentUrl,
+                parsedPostProcess.parameters,
+                parsedPostProcess.samplers,
+                parsedPostProcess.options,
+                targetCamera,
+                parsedPostProcess.renderTargetSamplingMode,
+                parsedPostProcess._engine,
+                parsedPostProcess.reusable,
+                parsedPostProcess.defines,
+                parsedPostProcess.textureType,
+                parsedPostProcess.vertexUrl,
+                parsedPostProcess.indexParameters,
+                false,
+                parsedPostProcess.textureFormat
+                );
+        }, parsedPostProcess, scene, rootUrl);
+    }
 }
+
+_TypeStore.RegisteredTypes["BABYLON.PostProcess"] = PostProcess;

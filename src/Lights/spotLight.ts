@@ -9,6 +9,7 @@ import { BaseTexture } from "../Materials/Textures/baseTexture";
 import { Light } from "./light";
 import { ShadowLight } from "./shadowLight";
 import { Texture } from '../Materials/Textures/texture';
+import { ProceduralTexture } from '../Materials/Textures/Procedurals/proceduralTexture';
 
 Node.AddNodeConstructor("Light_Type_2", (name, scene) => {
     return () => new SpotLight(name, Vector3.Zero(), Vector3.Zero(), 0, 0, scene);
@@ -103,7 +104,7 @@ export class SpotLight extends ShadowLight {
 
     private _projectionTextureMatrix = Matrix.Zero();
     /**
-    * Allows reading the projecton texture
+    * Allows reading the projection texture
     */
     public get projectionTextureMatrix(): Matrix {
         return this._projectionTextureMatrix;
@@ -176,13 +177,25 @@ export class SpotLight extends ShadowLight {
         this._projectionTexture = value;
         this._projectionTextureDirty = true;
         if (this._projectionTexture && !this._projectionTexture.isReady()) {
-            let texture = this._projectionTexture as Texture;
-            if (texture.onLoadObservable) {
-                texture.onLoadObservable.addOnce(() => {
+            if (SpotLight._IsProceduralTexture(this._projectionTexture)) {
+                this._projectionTexture.getEffect().executeWhenCompiled(() => {
+                    this._markMeshesAsLightDirty();
+                });
+            }
+            else if (SpotLight._IsTexture(this._projectionTexture)) {
+                this._projectionTexture.onLoadObservable.addOnce(() => {
                     this._markMeshesAsLightDirty();
                 });
             }
         }
+    }
+
+    private static _IsProceduralTexture(texture: BaseTexture): texture is ProceduralTexture {
+        return (texture as ProceduralTexture).onGeneratedObservable !== undefined;
+    }
+
+    private static _IsTexture(texture: BaseTexture): texture is Texture {
+        return (texture as Texture).onLoadObservable !== undefined;
     }
 
     private _projectionTextureViewLightDirty = true;
@@ -190,7 +203,21 @@ export class SpotLight extends ShadowLight {
     private _projectionTextureDirty = true;
     private _projectionTextureViewTargetVector = Vector3.Zero();
     private _projectionTextureViewLightMatrix = Matrix.Zero();
+
     private _projectionTextureProjectionLightMatrix = Matrix.Zero();
+    /**
+    * Gets or sets the light projection matrix as used by the projection texture
+    */
+    public get projectionTextureProjectionLightMatrix(): Matrix {
+        return this._projectionTextureProjectionLightMatrix;
+    }
+
+    public set projectionTextureProjectionLightMatrix(projection: Matrix) {
+        this._projectionTextureProjectionLightMatrix = projection;
+        this._projectionTextureProjectionLightDirty = false;
+        this._projectionTextureDirty = true;
+    }
+
     private _projectionTextureScalingMatrix = Matrix.FromValues(0.5, 0.0, 0.0, 0.0,
         0.0, 0.5, 0.0, 0.0,
         0.0, 0.0, 0.5, 0.0,
@@ -262,8 +289,12 @@ export class SpotLight extends ShadowLight {
         this._shadowAngleScale = this._shadowAngleScale || 1;
         var angle = this._shadowAngleScale * this._angle;
 
-        Matrix.PerspectiveFovLHToRef(angle, 1.0,
-            this.getDepthMinZ(activeCamera), this.getDepthMaxZ(activeCamera), matrix);
+        const minZ = this.shadowMinZ !== undefined ? this.shadowMinZ : activeCamera.minZ;
+        const maxZ = this.shadowMaxZ !== undefined ? this.shadowMaxZ : activeCamera.maxZ;
+
+        const useReverseDepthBuffer = this.getScene().getEngine().useReverseDepthBuffer;
+
+        Matrix.PerspectiveFovLHToRef(angle, 1.0, useReverseDepthBuffer ? maxZ : minZ, useReverseDepthBuffer ? minZ : maxZ, matrix);
     }
 
     protected _computeProjectionTextureViewLightMatrix(): void {
@@ -355,7 +386,7 @@ export class SpotLight extends ShadowLight {
     }
 
     /**
-     * Sets the passed Effect object with the SpotLight transfomed position (or position if not parented) and normalized direction.
+     * Sets the passed Effect object with the SpotLight transformed position (or position if not parented) and normalized direction.
      * @param effect The effect to update
      * @param lightIndex The index of the light in the effect to update
      * @returns The spot light
@@ -383,21 +414,12 @@ export class SpotLight extends ShadowLight {
             normalizeDirection = Vector3.Normalize(this.direction);
         }
 
-        if (this.getScene().useRightHandedSystem) {
-            this._uniformBuffer.updateFloat4("vLightDirection",
-                -normalizeDirection.x,
-                -normalizeDirection.y,
-                -normalizeDirection.z,
-                this._cosHalfAngle,
-                lightIndex);
-        } else {
-            this._uniformBuffer.updateFloat4("vLightDirection",
-                normalizeDirection.x,
-                normalizeDirection.y,
-                normalizeDirection.z,
-                this._cosHalfAngle,
-                lightIndex);
-        }
+        this._uniformBuffer.updateFloat4("vLightDirection",
+            normalizeDirection.x,
+            normalizeDirection.y,
+            normalizeDirection.z,
+            this._cosHalfAngle,
+            lightIndex);
 
         this._uniformBuffer.updateFloat4("vLightFalloff",
             this.range,

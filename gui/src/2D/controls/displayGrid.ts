@@ -2,6 +2,8 @@ import { Control } from "./control";
 import { _TypeStore } from 'babylonjs/Misc/typeStore';
 import { Nullable } from 'babylonjs/types';
 import { Measure } from '../measure';
+import { serialize } from 'babylonjs/Misc/decorators';
+import { ICanvasRenderingContext } from "babylonjs/Engines/ICanvas";
 
 /** Class used to render a grid  */
 export class DisplayGrid extends Control {
@@ -22,6 +24,7 @@ export class DisplayGrid extends Control {
     private _displayMinorLines = true;
 
     /** Gets or sets a boolean indicating if minor lines must be rendered (true by default)) */
+    @serialize()
     public get displayMinorLines(): boolean {
         return this._displayMinorLines;
     }
@@ -36,6 +39,7 @@ export class DisplayGrid extends Control {
     }
 
     /** Gets or sets a boolean indicating if major lines must be rendered (true by default)) */
+    @serialize()
     public get displayMajorLines(): boolean {
         return this._displayMajorLines;
     }
@@ -50,6 +54,7 @@ export class DisplayGrid extends Control {
     }
 
     /** Gets or sets background color (Black by default) */
+    @serialize()
     public get background(): string {
         return this._background;
     }
@@ -64,6 +69,7 @@ export class DisplayGrid extends Control {
     }
 
     /** Gets or sets the width of each cell (20 by default) */
+    @serialize()
     public get cellWidth(): number {
         return this._cellWidth;
     }
@@ -75,6 +81,7 @@ export class DisplayGrid extends Control {
     }
 
     /** Gets or sets the height of each cell (20 by default) */
+    @serialize()
     public get cellHeight(): number {
         return this._cellHeight;
     }
@@ -86,6 +93,7 @@ export class DisplayGrid extends Control {
     }
 
     /** Gets or sets the tickness of minor lines (1 by default) */
+    @serialize()
     public get minorLineTickness(): number {
         return this._minorLineTickness;
     }
@@ -97,6 +105,7 @@ export class DisplayGrid extends Control {
     }
 
     /** Gets or sets the color of minor lines (DarkGray by default) */
+    @serialize()
     public get minorLineColor(): string {
         return this._minorLineColor;
     }
@@ -108,6 +117,7 @@ export class DisplayGrid extends Control {
     }
 
     /** Gets or sets the tickness of major lines (2 by default) */
+    @serialize()
     public get majorLineTickness(): number {
         return this._majorLineTickness;
     }
@@ -119,6 +129,7 @@ export class DisplayGrid extends Control {
     }
 
     /** Gets or sets the color of major lines (White by default) */
+    @serialize()
     public get majorLineColor(): string {
         return this._majorLineColor;
     }
@@ -130,6 +141,7 @@ export class DisplayGrid extends Control {
     }
 
     /** Gets or sets the frequency of major lines (default is 1 every 5 minor lines)*/
+    @serialize()
     public get majorLineFrequency(): number {
         return this._majorLineFrequency;
     }
@@ -148,7 +160,7 @@ export class DisplayGrid extends Control {
         super(name);
     }
 
-    public _draw(context: CanvasRenderingContext2D, invalidatedRectangle?: Nullable<Measure>): void {
+    public _draw(context: ICanvasRenderingContext, invalidatedRectangle?: Nullable<Measure>): void {
         context.save();
 
         this._applyStates(context);

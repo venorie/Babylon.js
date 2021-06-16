@@ -12,6 +12,8 @@ import { Logger } from './Misc/logger';
 import { EngineStore } from './Engines/engineStore';
 import { Nullable } from './types';
 import { Node } from './node';
+import { Observer } from "./Misc/observable";
+import { ThinEngine } from "./Engines/thinEngine";
 
 /**
  * Set of assets to keep when moving a scene into an asset container.
@@ -43,6 +45,7 @@ export class InstantiatedEntries {
  */
 export class AssetContainer extends AbstractScene {
     private _wasAddedToScene = false;
+    private _onContextRestoredObserver: Nullable<Observer<ThinEngine>>;
 
     /**
      * The scene the AssetContainer belongs to.
@@ -68,6 +71,24 @@ export class AssetContainer extends AbstractScene {
                 this.dispose();
             }
         });
+
+        this._onContextRestoredObserver = scene.getEngine().onContextRestoredObservable.add(() => {
+            for (const geometry of this.geometries) {
+                geometry._rebuild();
+            }
+
+            for (const mesh of this.meshes) {
+                mesh._rebuild();
+            }
+
+            for (const system of this.particleSystems) {
+                system.rebuild();
+            }
+
+            for (const texture of this.textures) {
+                texture._rebuild();
+            }
+        });
     }
 
     /**
@@ -75,18 +96,21 @@ export class AssetContainer extends AbstractScene {
      * Skeletons and animation groups will all be cloned
      * @param nameFunction defines an optional function used to get new names for clones
      * @param cloneMaterials defines an optional boolean that defines if materials must be cloned as well (false by default)
+     * @param options defines an optional list of options to control how to instanciate / clone models
      * @returns a list of rootNodes, skeletons and aniamtion groups that were duplicated
      */
-    public instantiateModelsToScene(nameFunction?: (sourceName: string) => string, cloneMaterials = false): InstantiatedEntries {
+    public instantiateModelsToScene(nameFunction?: (sourceName: string) => string, cloneMaterials = false, options?: {doNotInstantiate: boolean}): InstantiatedEntries {
         let convertionMap: {[key: number]: number} = {};
         let storeMap: {[key: number]: any} = {};
         let result = new InstantiatedEntries();
         let alreadySwappedSkeletons: Skeleton[] = [];
         let alreadySwappedMaterials: Material[] = [];
 
-        let options = {
-            doNotInstantiate: true
-        };
+        if (!options) {
+            options = {
+                doNotInstantiate: true
+            };
+        }
 
         let onClone = (source: TransformNode, clone: TransformNode) => {
             convertionMap[source.uniqueId] = clone.uniqueId;
@@ -161,7 +185,9 @@ export class AssetContainer extends AbstractScene {
                                     }
                                 }
 
-                                mesh.material = storeMap[convertionMap[sourceMaterial.uniqueId]];
+                                if (mesh.getClassName() !== "InstancedMesh") {
+                                    mesh.material = storeMap[convertionMap[sourceMaterial.uniqueId]];
+                                }
                             } else {
                                 if (mesh.material.getClassName() === "MultiMaterial") {
                                     if (this.scene.multiMaterials.indexOf(mesh.material as MultiMaterial) === -1) {
@@ -193,8 +219,11 @@ export class AssetContainer extends AbstractScene {
 
             for (var m of this.meshes) {
                 if (m.skeleton === s && !m.isAnInstance) {
-                    let copy = storeMap[convertionMap[m.uniqueId]];
-                    (copy as Mesh).skeleton = clone;
+                    let copy = storeMap[convertionMap[m.uniqueId]] as Mesh;
+                    if (copy.isAnInstance) {
+                        continue;
+                    }
+                    copy.skeleton = clone;
 
                     if (alreadySwappedSkeletons.indexOf(clone) !== -1) {
                         continue;
@@ -283,6 +312,9 @@ export class AssetContainer extends AbstractScene {
         for (let component of this.scene._serializableComponents) {
             component.addFromContainer(this);
         }
+
+        this.scene.getEngine().onContextRestoredObservable.remove(this._onContextRestoredObserver);
+        this._onContextRestoredObserver = null;
     }
 
     /**
@@ -347,62 +379,62 @@ export class AssetContainer extends AbstractScene {
      * Disposes all the assets in the container
      */
     public dispose() {
-        this.cameras.forEach((o) => {
+        this.cameras.slice(0).forEach((o) => {
             o.dispose();
         });
         this.cameras = [];
 
-        this.lights.forEach((o) => {
+        this.lights.slice(0).forEach((o) => {
             o.dispose();
         });
         this.lights = [];
 
-        this.meshes.forEach((o) => {
+        this.meshes.slice(0).forEach((o) => {
             o.dispose();
         });
         this.meshes = [];
 
-        this.skeletons.forEach((o) => {
+        this.skeletons.slice(0).forEach((o) => {
             o.dispose();
         });
         this.skeletons = [];
 
-        this.animationGroups.forEach((o) => {
+        this.animationGroups.slice(0).forEach((o) => {
             o.dispose();
         });
         this.animationGroups = [];
 
-        this.multiMaterials.forEach((o) => {
+        this.multiMaterials.slice(0).forEach((o) => {
             o.dispose();
         });
         this.multiMaterials = [];
 
-        this.materials.forEach((o) => {
+        this.materials.slice(0).forEach((o) => {
             o.dispose();
         });
         this.materials = [];
 
-        this.geometries.forEach((o) => {
+        this.geometries.slice(0).forEach((o) => {
             o.dispose();
         });
         this.geometries = [];
 
-        this.transformNodes.forEach((o) => {
+        this.transformNodes.slice(0).forEach((o) => {
             o.dispose();
         });
         this.transformNodes = [];
 
-        this.actionManagers.forEach((o) => {
+        this.actionManagers.slice(0).forEach((o) => {
             o.dispose();
         });
         this.actionManagers = [];
 
-        this.textures.forEach((o) => {
+        this.textures.slice(0).forEach((o) => {
             o.dispose();
         });
         this.textures = [];
 
-        this.reflectionProbes.forEach((o) => {
+        this.reflectionProbes.slice(0).forEach((o) => {
             o.dispose();
         });
         this.reflectionProbes = [];
@@ -414,6 +446,11 @@ export class AssetContainer extends AbstractScene {
 
         for (let component of this.scene._serializableComponents) {
             component.removeFromContainer(this, true);
+        }
+
+        if (this._onContextRestoredObserver) {
+            this.scene.getEngine().onContextRestoredObservable.remove(this._onContextRestoredObserver);
+            this._onContextRestoredObserver = null;
         }
     }
 
@@ -435,6 +472,7 @@ export class AssetContainer extends AbstractScene {
 
             if (move) {
                 targetAssets.push(asset);
+                (asset as any)._parentContainer = this;
             }
         }
     }
@@ -456,6 +494,8 @@ export class AssetContainer extends AbstractScene {
                 this._moveAssets((<any>this.scene)[key], (<any>this)[key], (<any>keepAssets)[key]);
             }
         }
+
+        this.environmentTexture = this.scene.environmentTexture;
 
         this.removeAllFromScene();
     }

@@ -141,7 +141,7 @@ export class CloudPoint {
      * Returns a boolean. True if the particle intersects a mesh, else false
      * The intersection is computed on the particle position and Axis Aligned Bounding Box (AABB) or Sphere
      * @param target is the object (point or mesh) what the intersection is computed against
-     * @param isSphere is boolean flag when false (default) bounding box of mesh is used, when true the bouding sphere is used
+     * @param isSphere is boolean flag when false (default) bounding box of mesh is used, when true the bounding sphere is used
      * @returns true if it intersects
      */
     public intersectsMesh(target: Mesh, isSphere: boolean): boolean {
@@ -199,10 +199,20 @@ export class CloudPoint {
  */
 export class PointsGroup {
     /**
+     * Get or set the groupId
+     * @deprecated Please use groupId instead
+     */
+    public get groupID(): number {
+        return this.groupId;
+    }
+    public set groupID(groupID: number) {
+        this.groupId = groupID;
+    }
+    /**
      * The group id
      * @hidden
      */
-    public groupID: number;
+    public groupId: number;
     /**
      * image data for group (internal use)
      * @hidden
@@ -240,7 +250,7 @@ export class PointsGroup {
      * @hidden
      */
     constructor(id: number, posFunction: Nullable<(particle: CloudPoint, i?: number, s?: number) => void>) {
-        this.groupID = id;
+        this.groupId = id;
         this._positionFunction = posFunction;
     }
 }

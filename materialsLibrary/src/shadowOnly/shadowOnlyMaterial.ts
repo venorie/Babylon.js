@@ -8,7 +8,7 @@ import { IEffectCreationOptions } from "babylonjs/Materials/effect";
 import { MaterialDefines } from "babylonjs/Materials/materialDefines";
 import { MaterialHelper } from "babylonjs/Materials/materialHelper";
 import { PushMaterial } from "babylonjs/Materials/pushMaterial";
-import { VertexBuffer } from "babylonjs/Meshes/buffer";
+import { VertexBuffer } from "babylonjs/Buffers/buffer";
 import { AbstractMesh } from "babylonjs/Meshes/abstractMesh";
 import { SubMesh } from "babylonjs/Meshes/subMesh";
 import { Mesh } from "babylonjs/Meshes/mesh";
@@ -33,6 +33,7 @@ class ShadowOnlyMaterialDefines extends MaterialDefines {
     public NUM_BONE_INFLUENCERS = 0;
     public BonesPerMesh = 0;
     public INSTANCES = false;
+    public IMAGEPROCESSINGPOSTPROCESS = false;
 
     constructor() {
         super();
@@ -88,7 +89,7 @@ export class ShadowOnlyMaterial extends PushMaterial {
         }
 
         if (!subMesh._materialDefines) {
-            subMesh._materialDefines = new ShadowOnlyMaterialDefines();
+            subMesh.materialDefines = new ShadowOnlyMaterialDefines();
         }
 
         var defines = <ShadowOnlyMaterialDefines>subMesh._materialDefines;
@@ -156,6 +157,8 @@ export class ShadowOnlyMaterial extends PushMaterial {
                 fallbacks.addCPUSkinningFallback(0, mesh);
             }
 
+            defines.IMAGEPROCESSINGPOSTPROCESS = scene.imageProcessingConfiguration.applyByPostProcess;
+
             //Attributes
             var attribs = [VertexBuffer.PositionKind];
 
@@ -196,7 +199,7 @@ export class ShadowOnlyMaterial extends PushMaterial {
                     onCompiled: this.onCompiled,
                     onError: this.onError,
                     indexParameters: { maxSimultaneousLights: 1 }
-                }, engine), defines);
+                }, engine), defines, this._materialContext);
         }
         if (!subMesh.effect || !subMesh.effect.isReady()) {
             return false;
@@ -241,7 +244,7 @@ export class ShadowOnlyMaterial extends PushMaterial {
             this._activeEffect.setFloat("alpha", this.alpha);
             this._activeEffect.setColor3("shadowColor", this.shadowColor);
 
-            MaterialHelper.BindEyePosition(effect, scene);
+            scene.bindEyePosition(effect);
         }
 
         // Lights

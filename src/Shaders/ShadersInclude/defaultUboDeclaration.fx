@@ -31,21 +31,19 @@ uniform Material
 	mat4 bumpMatrix; 
 	vec2 vTangentSpaceParams;
 	float pointSize;
+    float alphaCutOff;
 	mat4 refractionMatrix;
 	vec4 vRefractionInfos;
+	vec3 vRefractionPosition;
+	vec3 vRefractionSize;
 	vec4 vSpecularColor;
 	vec3 vEmissiveColor;
-	float visibility;
 	vec4 vDiffuseColor;
+	vec3 vAmbientColor;
 
 	vec4 vDetailInfos;
 	mat4 detailMatrix;
 };
 
-uniform Scene {
-    mat4 viewProjection;
-#ifdef MULTIVIEW
-	mat4 viewProjectionR;
-#endif 
-	mat4 view;
-};
+#include<sceneUboDeclaration>
+#include<meshUboDeclaration>

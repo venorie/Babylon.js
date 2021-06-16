@@ -85,9 +85,19 @@
     #endif
     uniform sampler2D metallicReflectanceSampler;
 #endif
+#ifdef REFLECTANCE
+    #if REFLECTANCEDIRECTUV == 1
+        #define vReflectanceUV vMainUV1
+    #elif REFLECTANCEDIRECTUV == 2
+        #define vReflectanceUV vMainUV2
+    #else
+        varying vec2 vReflectanceUV;
+    #endif
+    uniform sampler2D reflectanceSampler;
+#endif
 
 #ifdef CLEARCOAT
-    #ifdef CLEARCOAT_TEXTURE
+    #if defined(CLEARCOAT_TEXTURE)
         #if CLEARCOAT_TEXTUREDIRECTUV == 1
             #define vClearCoatUV vMainUV1
         #elif CLEARCOAT_TEXTUREDIRECTUV == 2
@@ -95,7 +105,24 @@
         #else
             varying vec2 vClearCoatUV;
         #endif
+    #endif
+
+    #if defined(CLEARCOAT_TEXTURE_ROUGHNESS)
+        #if CLEARCOAT_TEXTURE_ROUGHNESSDIRECTUV == 1
+            #define vClearCoatRoughnessUV vMainUV1
+        #elif CLEARCOAT_TEXTURE_ROUGHNESSDIRECTUV == 2
+            #define vClearCoatRoughnessUV vMainUV2
+        #else
+            varying vec2 vClearCoatRoughnessUV;
+        #endif
+    #endif
+
+    #ifdef CLEARCOAT_TEXTURE
         uniform sampler2D clearCoatSampler;
+    #endif
+
+    #if defined(CLEARCOAT_TEXTURE_ROUGHNESS) && !defined(CLEARCOAT_TEXTURE_ROUGHNESS_IDENTICAL)
+        uniform sampler2D clearCoatRoughnessSampler;
     #endif
 
     #ifdef CLEARCOAT_BUMP
@@ -130,7 +157,24 @@
         #else
             varying vec2 vSheenUV;
         #endif
+    #endif
+
+    #ifdef SHEEN_TEXTURE_ROUGHNESS
+        #if SHEEN_TEXTURE_ROUGHNESSDIRECTUV == 1
+            #define vSheenRoughnessUV vMainUV1
+        #elif SHEEN_TEXTURE_ROUGHNESSDIRECTUV == 2
+            #define vSheenRoughnessUV vMainUV2
+        #else
+            varying vec2 vSheenRoughnessUV;
+        #endif
+    #endif
+
+    #ifdef SHEEN_TEXTURE
         uniform sampler2D sheenSampler;
+    #endif
+
+    #if defined(SHEEN_ROUGHNESS) && defined(SHEEN_TEXTURE_ROUGHNESS) && !defined(SHEEN_TEXTURE_ROUGHNESS_IDENTICAL)
+        uniform sampler2D sheenRoughnessSampler;
     #endif
 #endif
 
@@ -231,5 +275,27 @@
             varying vec2 vThicknessUV;
         #endif
         uniform sampler2D thicknessSampler;
+    #endif
+
+    #ifdef SS_REFRACTIONINTENSITY_TEXTURE
+        #if SS_REFRACTIONINTENSITY_TEXTUREDIRECTUV == 1
+            #define vRefractionIntensityUV vMainUV1
+        #elif SS_REFRACTIONINTENSITY_TEXTUREDIRECTUV == 2
+            #define vRefractionIntensityUV vMainUV2
+        #else
+            varying vec2 vRefractionIntensityUV;
+        #endif
+        uniform sampler2D refractionIntensitySampler;
+    #endif
+
+    #ifdef SS_TRANSLUCENCYINTENSITY_TEXTURE
+        #if SS_TRANSLUCENCYINTENSITY_TEXTUREDIRECTUV == 1
+            #define vTranslucencyIntensityUV vMainUV1
+        #elif SS_TRANSLUCENCYINTENSITY_TEXTUREDIRECTUV == 2
+            #define vTranslucencyIntensityUV vMainUV2
+        #else
+            varying vec2 vTranslucencyIntensityUV;
+        #endif
+        uniform sampler2D translucencyIntensitySampler;
     #endif
 #endif

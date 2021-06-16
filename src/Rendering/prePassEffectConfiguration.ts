@@ -5,19 +5,31 @@ import { PostProcess } from "../PostProcesses/postProcess";
  */
 export interface PrePassEffectConfiguration {
     /**
+     * Name of the effect
+     */
+    name: string;
+    /**
      * Post process to attach for this effect
      */
-    postProcess: PostProcess;
+    postProcess?: PostProcess;
+    /**
+     * Textures required in the MRT
+     */
+    texturesRequired: number[];
     /**
      * Is the effect enabled
      */
     enabled: boolean;
     /**
-     * Disposes the effect configuration
+     * Does the output of this prepass need to go through imageprocessing
      */
-    dispose(): void;
+    needsImageProcessing?: boolean;
     /**
      * Disposes the effect configuration
      */
-    createPostProcess: () => PostProcess;
+    dispose?: () => void;
+    /**
+     * Creates the associated post process
+     */
+    createPostProcess?: () => PostProcess;
 }

@@ -2,7 +2,7 @@ import { IndicesArray, FloatArray } from "../types";
 import { Color4, Color3 } from "../Maths/math";
 import { Vector2, Vector3, Vector4, TmpVectors, Matrix } from "../Maths/math.vector";
 import { Logger } from "../Misc/logger";
-import { VertexBuffer } from "../Meshes/buffer";
+import { VertexBuffer } from "../Buffers/buffer";
 import { VertexData } from "../Meshes/mesh.vertexData";
 import { Mesh } from "../Meshes/mesh";
 import { EngineStore } from "../Engines/engineStore";
@@ -14,6 +14,7 @@ import { PickingInfo } from "../Collisions/pickingInfo";
 import { StandardMaterial } from "../Materials/standardMaterial";
 import { BaseTexture } from "./../Materials/Textures/baseTexture";
 import { Scalar } from "../Maths/math.scalar";
+import { Material } from "../Materials/material";
 
 /** Defines the 4 color options */
 export enum PointColor {
@@ -31,7 +32,7 @@ export enum PointColor {
  * The PointCloudSystem (PCS) is a single updatable mesh. The points corresponding to the vertices of this big mesh.
  * As it is just a mesh, the PointCloudSystem has all the same properties as any other BJS mesh : not more, not less. It can be scaled, rotated, translated, enlighted, textured, moved, etc.
 
- * The PointCloudSytem is also a particle system, with each point being a particle. It provides some methods to manage the particles.
+ * The PointCloudSystem is also a particle system, with each point being a particle. It provides some methods to manage the particles.
  * However it is behavior agnostic. This means it has no emitter, no particle physics, no particle recycler. You have to implement your own behavior.
  *
  * Full documentation here : TO BE ENTERED
@@ -55,7 +56,7 @@ export class PointsCloudSystem implements IDisposable {
      */
     public name: string;
     /**
-     * The PCS mesh. It's a standard BJS Mesh, so all the methods from the Mesh class are avalaible.
+     * The PCS mesh. It's a standard BJS Mesh, so all the methods from the Mesh class are available.
      */
     public mesh: Mesh;
     /**
@@ -112,19 +113,20 @@ export class PointsCloudSystem implements IDisposable {
     /**
      * Builds the PCS underlying mesh. Returns a standard Mesh.
      * If no points were added to the PCS, the returned mesh is just a single point.
+     * @param material The material to use to render the mesh. If not provided, will create a default one
      * @returns a promise for the created mesh
      */
-    public buildMeshAsync(): Promise<Mesh> {
+    public buildMeshAsync(material?: Material): Promise<Mesh> {
         return Promise.all(this._promises).then(() => {
             this._isReady = true;
-            return this._buildMesh();
+            return this._buildMesh(material);
         });
     }
 
     /**
      * @hidden
      */
-    private _buildMesh(): Promise<Mesh> {
+    private _buildMesh(material?: Material): Promise<Mesh> {
         if (this.nbParticles === 0) {
             this.addPoints(1);
         }
@@ -157,11 +159,15 @@ export class PointsCloudSystem implements IDisposable {
             this.particles.length = 0;
         }
 
-        var mat = new StandardMaterial("point cloud material", this._scene);
-        mat.emissiveColor = new Color3(ec, ec, ec);
-        mat.disableLighting = true;
-        mat.pointsCloud = true;
-        mat.pointSize = this._size;
+        let mat = material;
+
+        if (!mat) {
+            mat = new StandardMaterial("point cloud material", this._scene);
+            (<StandardMaterial>mat).emissiveColor = new Color3(ec, ec, ec);
+            (<StandardMaterial>mat).disableLighting = true;
+            (<StandardMaterial>mat).pointsCloud = true;
+            (<StandardMaterial>mat).pointSize = this._size;
+        }
         mesh.material = mat;
 
         return new Promise((resolve) => resolve(mesh));
@@ -211,6 +217,7 @@ export class PointsCloudSystem implements IDisposable {
         mesh.computeWorldMatrix();
         var meshMatrix: Matrix = mesh.getWorldMatrix();
         if (!meshMatrix.isIdentity()) {
+            meshPos = meshPos.slice(0);
             for (var p = 0; p < meshPos.length / 3; p++) {
                 Vector3.TransformCoordinatesFromFloatsToRef(meshPos[3 * p], meshPos[3 * p + 1], meshPos[3 * p + 2], meshMatrix, place);
                 meshPos[3 * p] = place.x;
@@ -462,7 +469,7 @@ export class PointsCloudSystem implements IDisposable {
         var mat = mesh.material;
         let textureList: BaseTexture[] = mat.getActiveTextures();
         if (textureList.length === 0) {
-            Logger.Warn(mesh.name + "has no useable texture.");
+            Logger.Warn(mesh.name + "has no usable texture.");
             pointsGroup._groupImageData = null;
             this._setPointsColorOrUV(mesh, pointsGroup, isVolume, true, false);
             return;
@@ -470,7 +477,7 @@ export class PointsCloudSystem implements IDisposable {
 
         var clone = <Mesh>mesh.clone();
         clone.setEnabled(false);
-        this._promises.push(new Promise((resolve) => {
+        this._promises.push(new Promise((resolve: (_: void) => void) => {
             BaseTexture.WhenAllReady(textureList, () => {
                 let n = pointsGroup._textureNb;
                 if (n < 0) {
@@ -479,18 +486,29 @@ export class PointsCloudSystem implements IDisposable {
                 if (n > textureList.length - 1) {
                     n =  textureList.length - 1;
                 }
-                pointsGroup._groupImageData = textureList[n].readPixels();
-                pointsGroup._groupImgWidth = textureList[n].getSize().width;
-                pointsGroup._groupImgHeight = textureList[n].getSize().height;
-                this._setPointsColorOrUV(clone, pointsGroup, isVolume, true, true);
-                clone.dispose();
-                return resolve();
+                const finalize = () => {
+                    pointsGroup._groupImgWidth = textureList[n].getSize().width;
+                    pointsGroup._groupImgHeight = textureList[n].getSize().height;
+                    this._setPointsColorOrUV(clone, pointsGroup, isVolume, true, true);
+                    clone.dispose();
+                    resolve();
+                };
+                pointsGroup._groupImageData = null;
+                const dataPromise = textureList[n].readPixels();
+                if (!dataPromise) {
+                    finalize();
+                } else {
+                    dataPromise.then((data) => {
+                        pointsGroup._groupImageData = data;
+                        finalize();
+                    });
+                }
             });
         }));
     }
 
     // calculates the point density per facet of a mesh for surface points
-    private _calculateDensity(nbPoints: number, positions: FloatArray, indices: FloatArray): number[] {
+    private _calculateDensity(nbPoints: number, positions: FloatArray, indices: IndicesArray): number[] {
         var density: number[] = new Array<number>();
         var index: number;
         var id0: number;
@@ -905,7 +923,7 @@ export class PointsCloudSystem implements IDisposable {
     }
 
     /**
-     * Visibilty helper : Recomputes the visible size according to the mesh bounding box
+     * Visibility helper : Recomputes the visible size according to the mesh bounding box
      * doc :
      * @returns the PCS.
      */

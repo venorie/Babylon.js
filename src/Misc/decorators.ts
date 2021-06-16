@@ -32,7 +32,7 @@ var _copySource = function <T>(creationFunction: () => T, source: T, instanciate
         var sourceProperty = (<any>source)[property];
         var propertyType = propertyDescriptor.type;
 
-        if (sourceProperty !== undefined && sourceProperty !== null && property !== "uniqueId") {
+        if (sourceProperty !== undefined && sourceProperty !== null && (property !== "uniqueId" || SerializationHelper.AllowLoadingUniqueId)) {
             switch (propertyType) {
                 case 0:     // Value
                 case 6:     // Mesh reference
@@ -214,6 +214,11 @@ export function serializeAsCameraReference(sourceName?: string) {
  * Class used to help serialization objects
  */
 export class SerializationHelper {
+    /**
+    * Gets or sets a boolean to indicate if the UniqueId property should be serialized
+    */
+    public static AllowLoadingUniqueId = false;
+
     /** @hidden */
     public static _ImageProcessingConfigurationParser = (sourceProperty: any): ImageProcessingConfiguration => {
         throw _DevTools.WarnImport("ImageProcessingConfiguration");
@@ -253,7 +258,7 @@ export class SerializationHelper {
     /**
      * Static function used to serialized a specific entity
      * @param entity defines the entity to serialize
-     * @param serializationObject defines the optional target obecjt where serialization data will be stored
+     * @param serializationObject defines the optional target object where serialization data will be stored
      * @returns a JSON compatible object representing the serialization of the entity
      */
     public static Serialize<T>(entity: T, serializationObject?: any): any {
@@ -275,7 +280,7 @@ export class SerializationHelper {
             var propertyType = propertyDescriptor.type;
             var sourceProperty = (<any>entity)[property];
 
-            if (sourceProperty !== undefined && sourceProperty !== null) {
+            if (sourceProperty !== undefined && sourceProperty !== null && (property !== "uniqueId" || SerializationHelper.AllowLoadingUniqueId)) {
                 switch (propertyType) {
                     case 0:     // Value
                         serializationObject[targetPropertyName] = sourceProperty;
@@ -312,6 +317,7 @@ export class SerializationHelper {
                         break;
                     case 11:    // Camera reference
                         serializationObject[targetPropertyName] = (<Camera>sourceProperty).id;
+                        break;
                     case 12:    // Matrix
                         serializationObject[targetPropertyName] = (<Matrix>sourceProperty).asArray();
                         break;
@@ -350,7 +356,7 @@ export class SerializationHelper {
             var sourceProperty = source[propertyDescriptor.sourceName || property];
             var propertyType = propertyDescriptor.type;
 
-            if (sourceProperty !== undefined && sourceProperty !== null) {
+            if (sourceProperty !== undefined && sourceProperty !== null && (property !== "uniqueId" || SerializationHelper.AllowLoadingUniqueId)) {
                 var dest = <any>destination;
                 switch (propertyType) {
                     case 0:     // Value
@@ -375,7 +381,7 @@ export class SerializationHelper {
                         break;
                     case 6:     // Mesh reference
                         if (scene) {
-                            dest[property] = scene.getLastMeshByID(sourceProperty);
+                            dest[property] = scene.getLastMeshById(sourceProperty);
                         }
                         break;
                     case 7:     // Color Curves
@@ -392,7 +398,7 @@ export class SerializationHelper {
                         break;
                     case 11:    // Camera reference
                         if (scene) {
-                            dest[property] = scene.getCameraByID(sourceProperty);
+                            dest[property] = scene.getCameraById(sourceProperty);
                         }
                     case 12:    // Matrix
                         dest[property] = Matrix.FromArray(sourceProperty);

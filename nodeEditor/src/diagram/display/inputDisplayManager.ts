@@ -7,7 +7,6 @@ import { AnimatedInputBlockTypes } from 'babylonjs/Materials/Node/Blocks/Input/a
 import { Vector2, Vector3, Vector4 } from 'babylonjs/Maths/math.vector';
 import { Color3 } from 'babylonjs/Maths/math.color';
 import { BlockTools } from '../../blockTools';
-import { StringTools } from '../../stringTools';
 
 const inputNameToAttributeValue: { [name: string] : string } = {
     "position2d" : "position",
@@ -18,7 +17,7 @@ const inputNameToAttributeValue: { [name: string] : string } = {
 };
 
 const inputNameToAttributeName: { [name: string] : string } = {
-    "position2d" : "postprocess",
+    "position2d" : "screen",
     "particle_uv" : "particle",
     "particle_color" : "particle",
     "particle_texturemask": "particle",
@@ -46,13 +45,17 @@ export class InputDisplayManager implements IDisplayManager {
 
     public getHeaderText(block: NodeMaterialBlock): string {
         let inputBlock = block as InputBlock;
-        let name = `${inputBlock.name} (${StringTools.GetBaseType(inputBlock.output.type)})`;
+        let name = `${inputBlock.name} (${InputDisplayManager.GetBaseType(inputBlock.output.type)})`;
 
         if (inputBlock.isAttribute) {
-            name = StringTools.GetBaseType(inputBlock.output.type);
+            name = InputDisplayManager.GetBaseType(inputBlock.output.type);
         }
 
         return name;
+    }
+
+    public static GetBaseType(type: NodeMaterialBlockConnectionPointTypes): string {
+        return NodeMaterialBlockConnectionPointTypes[type];
     }
 
     public getBackgroundColor(block: NodeMaterialBlock): string {
@@ -119,7 +122,7 @@ export class InputDisplayManager implements IDisplayManager {
                     if (inputBlock.animationType !== AnimatedInputBlockTypes.None) {
                         value = AnimatedInputBlockTypes[inputBlock.animationType];
                     } else {
-                        value = inputBlock.value.toFixed(2);
+                        value = inputBlock.value.toFixed(4);
                     }
                     break;
                 case NodeMaterialBlockConnectionPointTypes.Vector2:

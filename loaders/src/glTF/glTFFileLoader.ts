@@ -3,13 +3,10 @@ import { Nullable } from "babylonjs/types";
 import { Observable, Observer } from "babylonjs/Misc/observable";
 import { Tools } from "babylonjs/Misc/tools";
 import { Camera } from "babylonjs/Cameras/camera";
-import { AnimationGroup } from "babylonjs/Animations/animationGroup";
-import { Skeleton } from "babylonjs/Bones/skeleton";
-import { IParticleSystem } from "babylonjs/Particles/IParticleSystem";
 import { BaseTexture } from "babylonjs/Materials/Textures/baseTexture";
 import { Material } from "babylonjs/Materials/material";
 import { AbstractMesh } from "babylonjs/Meshes/abstractMesh";
-import { SceneLoader, ISceneLoaderPluginFactory, ISceneLoaderPlugin, ISceneLoaderPluginAsync, ISceneLoaderProgressEvent, ISceneLoaderPluginExtensions } from "babylonjs/Loading/sceneLoader";
+import { SceneLoader, ISceneLoaderPluginFactory, ISceneLoaderPlugin, ISceneLoaderPluginAsync, ISceneLoaderProgressEvent, ISceneLoaderPluginExtensions, ISceneLoaderAsyncResult } from "babylonjs/Loading/sceneLoader";
 import { AssetContainer } from "babylonjs/assetContainer";
 import { Scene, IDisposable } from "babylonjs/scene";
 import { WebRequest } from "babylonjs/Misc/webRequest";
@@ -17,8 +14,6 @@ import { IFileRequest } from "babylonjs/Misc/fileRequest";
 import { Logger } from 'babylonjs/Misc/logger';
 import { DataReader, IDataBuffer } from 'babylonjs/Misc/dataReader';
 import { GLTFValidation } from './glTFValidation';
-import { Light } from 'babylonjs/Lights/light';
-import { TransformNode } from 'babylonjs/Meshes/transformNode';
 import { RequestFileError } from 'babylonjs/Misc/fileTools';
 import { StringTools } from 'babylonjs/Misc/stringTools';
 
@@ -120,19 +115,9 @@ export enum GLTFLoaderState {
 }
 
 /** @hidden */
-export interface IImportMeshAsyncOutput {
-    meshes: AbstractMesh[];
-    particleSystems: IParticleSystem[];
-    skeletons: Skeleton[];
-    animationGroups: AnimationGroup[];
-    lights: Light[];
-    transformNodes: TransformNode[];
-}
-
-/** @hidden */
 export interface IGLTFLoader extends IDisposable {
     readonly state: Nullable<GLTFLoaderState>;
-    importMeshAsync: (meshesNames: any, scene: Scene, forAssetContainer: boolean, data: IGLTFLoaderData, rootUrl: string, onProgress?: (event: ISceneLoaderProgressEvent) => void, fileName?: string) => Promise<IImportMeshAsyncOutput>;
+    importMeshAsync: (meshesNames: any, scene: Scene, container: Nullable<AssetContainer>, data: IGLTFLoaderData, rootUrl: string, onProgress?: (event: ISceneLoaderProgressEvent) => void, fileName?: string) => Promise<ISceneLoaderAsyncResult>;
     loadAsync: (scene: Scene, data: IGLTFLoaderData, rootUrl: string, onProgress?: (event: ISceneLoaderProgressEvent) => void, fileName?: string) => Promise<void>;
 }
 
@@ -240,12 +225,23 @@ export class GLTFFileLoader implements IDisposable, ISceneLoaderPluginAsync, ISc
     public alwaysComputeBoundingBox = false;
 
     /**
+     * If true, load all materials defined in the file, even if not used by any mesh. Defaults to false.
+     */
+    public loadAllMaterials = false;
+
+    /**
+     * If true, load the color (gamma encoded) textures into sRGB buffers (if supported by the GPU), which will yield more accurate results when sampling the texture. Defaults to true.
+     */
+    public useSRGBBuffers = true;
+
+     /**
      * Function called before loading a url referenced by the asset.
      */
     public preprocessUrlAsync = (url: string) => Promise.resolve(url);
 
     /**
      * Observable raised when the loader creates a mesh after parsing the glTF properties of the mesh.
+     * Note that the observable is raised as soon as the mesh object is created, meaning some data may not have been setup yet for this mesh (vertex data, morph targets, material, ...)
      */
     public readonly onMeshLoadedObservable = new Observable<AbstractMesh>();
 
@@ -253,6 +249,7 @@ export class GLTFFileLoader implements IDisposable, ISceneLoaderPluginAsync, ISc
 
     /**
      * Callback raised when the loader creates a mesh after parsing the glTF properties of the mesh.
+     * Note that the callback is called as soon as the mesh object is created, meaning some data may not have been setup yet for this mesh (vertex data, morph targets, material, ...)
      */
     public set onMeshLoaded(callback: (mesh: AbstractMesh) => void) {
         if (this._onMeshLoadedObserver) {
@@ -573,14 +570,14 @@ export class GLTFFileLoader implements IDisposable, ISceneLoaderPluginAsync, ISc
     }
 
     /** @hidden */
-    public importMeshAsync(meshesNames: any, scene: Scene, data: any, rootUrl: string, onProgress?: (event: ISceneLoaderProgressEvent) => void, fileName?: string): Promise<{ meshes: AbstractMesh[], particleSystems: IParticleSystem[], skeletons: Skeleton[], animationGroups: AnimationGroup[] }> {
+    public importMeshAsync(meshesNames: any, scene: Scene, data: any, rootUrl: string, onProgress?: (event: ISceneLoaderProgressEvent) => void, fileName?: string): Promise<ISceneLoaderAsyncResult> {
         return Promise.resolve().then(() => {
             this.onParsedObservable.notifyObservers(data);
             this.onParsedObservable.clear();
 
             this._log(`Loading ${fileName || ""}`);
             this._loader = this._getLoader(data);
-            return this._loader.importMeshAsync(meshesNames, scene, false, data, rootUrl, onProgress, fileName);
+            return this._loader.importMeshAsync(meshesNames, scene, null, data, rootUrl, onProgress, fileName);
         });
     }
 
@@ -612,37 +609,18 @@ export class GLTFFileLoader implements IDisposable, ISceneLoaderPluginAsync, ISc
             const materials: Array<Material> = [];
             this.onMaterialLoadedObservable.add((material) => {
                 materials.push(material);
-                material.onDisposeObservable.addOnce(() => {
-                    let index = container.materials.indexOf(material);
-                    if (index > -1) {
-                        container.materials.splice(index, 1);
-                    }
-                    index = materials.indexOf(material);
-                    if (index > -1) {
-                        materials.splice(index, 1);
-                    }
-                });
             });
             const textures: Array<BaseTexture> = [];
             this.onTextureLoadedObservable.add((texture) => {
                 textures.push(texture);
-                texture.onDisposeObservable.addOnce(() => {
-                    let index = container.textures.indexOf(texture);
-                    if (index > -1) {
-                        container.textures.splice(index, 1);
-                    }
-                    index = textures.indexOf(texture);
-                    if (index > -1) {
-                        textures.splice(index, 1);
-                    }
-                });
             });
             const cameras: Array<Camera> = [];
             this.onCameraLoadedObservable.add((camera) => {
                 cameras.push(camera);
             });
 
-            return this._loader.importMeshAsync(null, scene, true, data, rootUrl, onProgress, fileName).then((result) => {
+            return this._loader.importMeshAsync(null, scene, container, data, rootUrl, onProgress, fileName).then((result) => {
+                Array.prototype.push.apply(container.geometries, result.geometries);
                 Array.prototype.push.apply(container.meshes, result.meshes);
                 Array.prototype.push.apply(container.particleSystems, result.particleSystems);
                 Array.prototype.push.apply(container.skeletons, result.skeletons);
@@ -722,7 +700,7 @@ export class GLTFFileLoader implements IDisposable, ISceneLoaderPluginAsync, ISc
     public _loadFile(url: string, scene: Scene, onSuccess: (data: string | ArrayBuffer) => void, useArrayBuffer?: boolean, onError?: (request?: WebRequest) => void): IFileRequest {
         const request = scene._loadFile(url, onSuccess, (event) => {
             this._onProgress(event, request);
-        }, undefined, useArrayBuffer, onError) as IFileRequestInfo;
+        }, true, useArrayBuffer, onError) as IFileRequestInfo;
         request.onCompleteObservable.add((request) => {
             this._requests.splice(this._requests.indexOf(request), 1);
         });
@@ -734,7 +712,7 @@ export class GLTFFileLoader implements IDisposable, ISceneLoaderPluginAsync, ISc
     public _requestFile(url: string, scene: Scene, onSuccess: (data: string | ArrayBuffer, request?: WebRequest) => void, useArrayBuffer?: boolean, onError?: (error: RequestFileError) => void, onOpened?: (request: WebRequest) => void): IFileRequest {
         const request = scene._requestFile(url, onSuccess, (event) => {
             this._onProgress(event, request);
-        }, undefined, useArrayBuffer, onError, onOpened) as IFileRequestInfo;
+        }, true, useArrayBuffer, onError, onOpened) as IFileRequestInfo;
         request.onCompleteObservable.add((request) => {
             this._requests.splice(this._requests.indexOf(request), 1);
         });

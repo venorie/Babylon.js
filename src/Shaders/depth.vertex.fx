@@ -30,6 +30,8 @@ void main(void)
 #ifdef UV1
     vec2 uvUpdated = uv;
 #endif
+
+#include<morphTargetsVertexGlobal>
 #include<morphTargetsVertex>[0..maxSimultaneousMorphTargets]
 
 #include<instancesVertex>
@@ -38,7 +40,11 @@ void main(void)
 
 	gl_Position = viewProjection * finalWorld * vec4(positionUpdated, 1.0);
 	
-	vDepthMetric = ((gl_Position.z + depthValues.x) / (depthValues.y));
+    #if USE_REVERSE_DEPTHBUFFER
+	    vDepthMetric = ((-gl_Position.z + depthValues.x) / (depthValues.y));
+    #else
+	    vDepthMetric = ((gl_Position.z + depthValues.x) / (depthValues.y));
+    #endif
 
 #if defined(ALPHATEST) || defined(BASIC_RENDER)
 #ifdef UV1

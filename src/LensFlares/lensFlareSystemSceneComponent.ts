@@ -51,11 +51,19 @@ declare module "../abstractScene" {
         getLensFlareSystemByName(name: string): Nullable<LensFlareSystem>;
 
         /**
-         * Gets a lens flare system using its id
-         * @param id defines the id to look for
+         * Gets a lens flare system using its Id
+         * @param id defines the Id to look for
          * @returns the lens flare system or null if not found
+         * @deprecated Please use getLensFlareSystemById instead
          */
         getLensFlareSystemByID(id: string): Nullable<LensFlareSystem>;
+
+        /**
+         * Gets a lens flare system using its Id
+         * @param id defines the Id to look for
+         * @returns the lens flare system or null if not found
+         */
+        getLensFlareSystemById(id: string): Nullable<LensFlareSystem>;
     }
 }
 
@@ -69,7 +77,7 @@ AbstractScene.prototype.getLensFlareSystemByName = function(name: string): Nulla
     return null;
 };
 
-AbstractScene.prototype.getLensFlareSystemByID = function(id: string): Nullable<LensFlareSystem> {
+AbstractScene.prototype.getLensFlareSystemById = function(id: string): Nullable<LensFlareSystem> {
     for (var index = 0; index < this.lensFlareSystems.length; index++) {
         if (this.lensFlareSystems[index].id === id) {
             return this.lensFlareSystems[index];
@@ -77,6 +85,10 @@ AbstractScene.prototype.getLensFlareSystemByID = function(id: string): Nullable<
     }
 
     return null;
+};
+
+AbstractScene.prototype.getLensFlareSystemByID = function(id: string): Nullable<LensFlareSystem> {
+    return this.getLensFlareSystemById(id);
 };
 
 AbstractScene.prototype.removeLensFlareSystem = function(toRemove: LensFlareSystem): number {
@@ -97,7 +109,7 @@ AbstractScene.prototype.addLensFlareSystem = function(newLensFlareSystem: LensFl
  */
 export class LensFlareSystemSceneComponent implements ISceneSerializableComponent {
     /**
-     * The component name helpfull to identify the component in the list of scene components.
+     * The component name helpful to identify the component in the list of scene components.
      */
     public readonly name = SceneComponentConstants.NAME_LENSFLARESYSTEM;
 
@@ -128,7 +140,9 @@ export class LensFlareSystemSceneComponent implements ISceneSerializableComponen
      * context lost for instance.
      */
     public rebuild(): void {
-        // Nothing to do for lens flare
+        for (let index = 0; index < this.scene.lensFlareSystems.length; index++) {
+            this.scene.lensFlareSystems[index].rebuild();
+        }
     }
 
     /**
@@ -175,7 +189,7 @@ export class LensFlareSystemSceneComponent implements ISceneSerializableComponen
     }
 
     /**
-     * Disposes the component and the associated ressources.
+     * Disposes the component and the associated resources.
      */
     public dispose(): void {
         let lensFlareSystems = this.scene.lensFlareSystems;

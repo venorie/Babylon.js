@@ -18,7 +18,7 @@ import "../../Materials/Textures/baseTexture.polynomial";
  * This represents a texture coming from an HDR input.
  *
  * The only supported format is currently panorama picture stored in RGBE format.
- * Example of such files can be found on HDRLib: http://hdrlib.com/
+ * Example of such files can be found on HDRI Haven: https://hdrihaven.com/
  */
 export class HDRCubeTexture extends BaseTexture {
 
@@ -44,20 +44,15 @@ export class HDRCubeTexture extends BaseTexture {
      */
     public url: string;
 
-    /**
-     * The texture coordinates mode. As this texture is stored in a cube format, please modify carefully.
-     */
-    public coordinatesMode = Texture.CUBIC_MODE;
-
     protected _isBlocking: boolean = true;
     /**
-     * Sets wether or not the texture is blocking during loading.
+     * Sets whether or not the texture is blocking during loading.
      */
     public set isBlocking(value: boolean) {
         this._isBlocking = value;
     }
     /**
-     * Gets wether or not the texture is blocking during loading.
+     * Gets whether or not the texture is blocking during loading.
      */
     public get isBlocking(): boolean {
         return this._isBlocking;
@@ -124,6 +119,7 @@ export class HDRCubeTexture extends BaseTexture {
             return;
         }
 
+        this._coordinatesMode = Texture.CUBIC_MODE;
         this.name = url;
         this.url = url;
         this.hasAlpha = false;
@@ -241,7 +237,7 @@ export class HDRCubeTexture extends BaseTexture {
             return results;
         };
 
-        if (this._getEngine()!.webGLVersion >= 2 && this._prefilterOnLoad) {
+        if (engine._features.allowTexturePrefiltering && this._prefilterOnLoad) {
             const previousOnLoad = this._onLoad;
             const hdrFiltering = new HDRFiltering(engine);
             this._onLoad = () => {

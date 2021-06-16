@@ -15,9 +15,6 @@
 // Constants
 #define RECIPROCAL_PI2 0.15915494
 
-uniform vec3 vEyePosition;
-uniform vec3 vAmbientColor;
-
 // Input
 varying vec3 vPositionW;
 
@@ -35,10 +32,6 @@ varying vec4 vColor;
 
 #ifdef MAINUV2
 	varying vec2 vMainUV2;
-#endif
-
-#ifdef PREPASS
-	varying vec3 vViewPos;
 #endif
 
 // Helper functions
@@ -127,10 +120,6 @@ uniform sampler2D refraction2DSampler;
 	uniform sampler2D specularSampler;
 #endif
 
-#ifdef ALPHATEST
-	uniform float alphaCutOff;
-#endif
-
 // Fresnel
 #include<fresnelFunction>
 
@@ -175,7 +164,7 @@ void main(void) {
 
 
 
-	vec3 viewDirectionW = normalize(vEyePosition - vPositionW);
+	vec3 viewDirectionW = normalize(vEyePosition.xyz - vPositionW);
 
 	// Base color
 	vec4 baseColor = vec4(1., 1., 1., 1.);
@@ -279,6 +268,9 @@ void main(void) {
 #ifdef REFRACTION
 	vec3 refractionVector = normalize(refract(-viewDirectionW, normalW, vRefractionInfos.y));
 	#ifdef REFRACTIONMAP_3D
+        #ifdef USE_LOCAL_REFRACTIONMAP_CUBIC
+            refractionVector = parallaxCorrectNormal(vPositionW, refractionVector, vRefractionSize, vRefractionPosition);
+        #endif
 		refractionVector.y = refractionVector.y * vRefractionInfos.w;
 
 		if (dot(refractionVector, viewDirectionW) < 1.0) {
@@ -307,6 +299,9 @@ vec4 reflectionColor = vec4(0., 0., 0., 1.);
 
 #ifdef REFLECTION
 	vec3 vReflectionUVW = computeReflectionCoords(vec4(vPositionW, 1.0), normalW);
+	#ifdef REFLECTIONMAP_OPPOSITEZ
+		vReflectionUVW.z *= -1.0;
+	#endif
 
 	#ifdef REFLECTIONMAP_3D
 		#ifdef ROUGHNESS
@@ -481,11 +476,50 @@ color.rgb = max(color.rgb, 0.);
 
 #define CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR
 #ifdef PREPASS
-    gl_FragData[0] = color; // Lit without irradiance
-    gl_FragData[1] = vec4(0.0, 0.0, 0.0, 1.0); // Irradiance
-    gl_FragData[2] = vec4(vViewPos.z, (view * vec4(normalW, 0.0)).rgb); // Linear depth + normal
-    gl_FragData[3] = vec4(0.0, 0.0, 0.0, 1.0); // albedo, for pre and post scatter
+	float writeGeometryInfo = color.a > 0.4 ? 1.0 : 0.0;
+
+    gl_FragData[0] = color; // We can't split irradiance on std material
+    
+    #ifdef PREPASS_POSITION
+    gl_FragData[PREPASS_POSITION_INDEX] = vec4(vPositionW, writeGeometryInfo);
+    #endif
+
+    #ifdef PREPASS_VELOCITY
+    vec2 a = (vCurrentPosition.xy / vCurrentPosition.w) * 0.5 + 0.5;
+    vec2 b = (vPreviousPosition.xy / vPreviousPosition.w) * 0.5 + 0.5;
+
+    vec2 velocity = abs(a - b);
+    velocity = vec2(pow(velocity.x, 1.0 / 3.0), pow(velocity.y, 1.0 / 3.0)) * sign(a - b) * 0.5 + 0.5;
+
+    gl_FragData[PREPASS_VELOCITY_INDEX] = vec4(velocity, 0.0, writeGeometryInfo);
+    #endif
+
+    #ifdef PREPASS_IRRADIANCE
+        gl_FragData[PREPASS_IRRADIANCE_INDEX] = vec4(0.0, 0.0, 0.0, writeGeometryInfo); //  We can't split irradiance on std material
+    #endif
+
+    #ifdef PREPASS_DEPTH
+        gl_FragData[PREPASS_DEPTH_INDEX] = vec4(vViewPos.z, 0.0, 0.0, writeGeometryInfo); // Linear depth
+    #endif
+
+    #ifdef PREPASS_NORMAL
+        gl_FragData[PREPASS_NORMAL_INDEX] = vec4((view * vec4(normalW, 0.0)).rgb, writeGeometryInfo); // Normal
+    #endif
+
+    #ifdef PREPASS_ALBEDO
+        gl_FragData[PREPASS_ALBEDO_INDEX] = vec4(0.0, 0.0, 0.0, writeGeometryInfo); // We can't split albedo on std material
+    #endif
+    #ifdef PREPASS_REFLECTIVITY
+        #if defined(SPECULAR)
+            gl_FragData[PREPASS_REFLECTIVITY_INDEX] = vec4(specularMapColor.rgb, writeGeometryInfo);
+        #else
+            gl_FragData[PREPASS_REFLECTIVITY_INDEX] = vec4(0.0, 0.0, 0.0, writeGeometryInfo);
+        #endif
+    #endif
 #endif
+
+#if !defined(PREPASS) || defined(WEBGL2) 
 	gl_FragColor = color;
+#endif
 
 }

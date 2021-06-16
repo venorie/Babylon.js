@@ -1,11 +1,24 @@
 import { IWebRequest } from './interfaces/iWebRequest';
 import { Nullable } from '../types';
 
+/** @hidden */
+declare const _native: any;
+
+/** @hidden */
+function createXMLHttpRequest(): XMLHttpRequest {
+    // If running in Babylon Native, then defer to the native XMLHttpRequest, which has the same public contract
+    if (typeof _native !== 'undefined' && _native.XMLHttpRequest) {
+        return new _native.XMLHttpRequest();
+    } else {
+        return new XMLHttpRequest();
+    }
+}
+
 /**
  * Extended version of XMLHttpRequest with support for customizations (headers, ...)
  */
 export class WebRequest implements IWebRequest {
-    private _xhr = new XMLHttpRequest();
+    private readonly _xhr = createXMLHttpRequest();
 
     /**
      * Custom HTTP Request Headers to be sent with XMLHttpRequests
@@ -89,6 +102,17 @@ export class WebRequest implements IWebRequest {
 
     public set responseType(value: XMLHttpRequestResponseType) {
         this._xhr.responseType = value;
+    }
+
+    /**
+     * Gets or sets the timeout value in milliseconds
+     */
+     public get timeout(): number {
+        return this._xhr.timeout;
+    }
+
+    public set timeout(value: number) {
+        this._xhr.timeout = value;
     }
 
     /** @hidden */

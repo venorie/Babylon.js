@@ -106,7 +106,7 @@ export class TargetCamera extends Camera {
      * @param name Defines the name of the camera in the scene
      * @param position Defines the start position of the camera in the scene
      * @param scene Defines the scene the camera belongs to
-     * @param setActiveOnSceneIfNoneActive Defines wheter the camera should be marked as active if not other active cameras have been defined
+     * @param setActiveOnSceneIfNoneActive Defines whether the camera should be marked as active if not other active cameras have been defined
      */
     constructor(name: string, position: Vector3, scene: Scene, setActiveOnSceneIfNoneActive = true) {
         super(name, position, scene, setActiveOnSceneIfNoneActive);
@@ -236,7 +236,7 @@ export class TargetCamera extends Camera {
 
     /**
      * Defines the target the camera should look at.
-     * @param target Defines the new target as a Vector or a mesh
+     * @param target Defines the new target as a Vector
      */
     public setTarget(target: Vector3): void {
         this.upVector.normalize();
@@ -246,6 +246,8 @@ export class TargetCamera extends Camera {
         if (this.position.z === target.z) {
             this.position.z += Epsilon;
         }
+
+        this._referencePoint.normalize().scaleInPlace(this._initialFocalDistance);
 
         Matrix.LookAtLHToRef(this.position, target, this._defaultUp, this._camMatrix);
         this._camMatrix.invert();
@@ -277,6 +279,17 @@ export class TargetCamera extends Camera {
         if (this.rotationQuaternion) {
             Quaternion.RotationYawPitchRollToRef(this.rotation.y, this.rotation.x, this.rotation.z, this.rotationQuaternion);
         }
+    }
+
+    /**
+     * Defines the target point of the camera.
+     * The camera looks towards it form the radius distance.
+     */
+    public get target(): Vector3 {
+        return this.getTarget();
+    }
+    public set target(value: Vector3) {
+        this.setTarget(value);
     }
 
     /**

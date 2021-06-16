@@ -94,7 +94,7 @@ export class ParticleHelper {
                 return resolve(ParticleSystemSet.Parse(newData, scene!, gpu));
             }, undefined, undefined, undefined, () => {
                 scene!._removePendingData(token);
-                return reject(`An error occured while the creation of your particle system. Check if your type '${type}' exists.`);
+                return reject(`An error occurred with the creation of your particle system. Check if your type '${type}' exists.`);
             });
 
         });
@@ -159,13 +159,19 @@ export class ParticleHelper {
 
     /**
      * Creates a particle system from a snippet saved by the particle system editor
-     * @param snippetId defines the snippet to load
+     * @param snippetId defines the snippet to load (can be set to _BLANK to create a default one)
      * @param scene defines the hosting scene
      * @param gpu If the system will use gpu
      * @param rootUrl defines the root URL to use to load textures and relative dependencies
      * @returns a promise that will resolve to the new particle system
      */
     public static CreateFromSnippetAsync(snippetId: string, scene: Scene, gpu: boolean = false, rootUrl: string = ""): Promise<IParticleSystem> {
+        if (snippetId === "_BLANK") {
+            let system = this.CreateDefault(null);
+            system.start();
+            return Promise.resolve(system);
+        }
+
         return new Promise((resolve, reject) => {
             var request = new WebRequest();
             request.addEventListener("readystatechange", () => {

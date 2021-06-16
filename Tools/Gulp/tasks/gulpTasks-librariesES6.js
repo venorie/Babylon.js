@@ -4,6 +4,7 @@ var path = require("path");
 var fs = require("fs-extra");
 var shelljs = require("shelljs");
 var concat = require('gulp-concat');
+var symlinkDir = require('symlink-dir');
 
 // Gulp Helpers
 var rmDir = require("../../NodeHelpers/rmDir");
@@ -76,6 +77,11 @@ var dep = function(settings) {
     if (settings.build.es6.buildDependencies) {
         for (let pathName of settings.build.es6.buildDependencies) {
             const dependencyPath = path.join(config.computed.rootFolder, pathName);
+            copyPaths.push(dependencyPath);
+        }
+
+        if (settings.build.sharedUiComponents) {
+            const dependencyPath = path.join(config.computed.rootFolder, config.computed.sharedUiComponentsFilesGlob);
             copyPaths.push(dependencyPath);
         }
     }
@@ -265,6 +271,23 @@ var copyWebpackDist = function(settings, module) {
 }
 
 /**
+ * Generate our required symlinked for the shared components.
+ */
+var generateSharedUiComponents = function(settings, done) {
+    if (!settings.build.sharedUiComponents) {
+        done();
+        return;
+    }
+
+    var es6SrcSharedUiComponents = config.computed.es6SharedUiComponentsSrcPath;
+    var es6SharedUiComponents = path.resolve(settings.computed.sourceES6Directory, settings.build.sharedUiComponents);
+
+    symlinkDir(es6SrcSharedUiComponents, es6SharedUiComponents).then(() => {
+        done();
+    });
+};
+
+/**
  * Dynamic es 6 module creation.
  */
 function buildES6Library(settings, module) {
@@ -274,10 +297,11 @@ function buildES6Library(settings, module) {
     var cleanAndShaderTasks = [ function cleanES6(cb) { return cleanSourceAndDist(settings, cb); } ];
     if (settings.computed.shaderTSGlob) {
         cleanAndShaderTasks.push(function cleanES6Shaders() { return cleanShaders(settings); });
-        cleanAndShaderTasks.push(function() { return buildShaders(settings); });
+        cleanAndShaderTasks.push(function buildES6Shaders() { return buildShaders(settings); });
     }
     var copySource = function() { return source(settings); };
     var dependencies = function() { return dep(settings); };
+    var sharedUiComponents = function(cb) { return generateSharedUiComponents(settings, cb); };
     var adaptSourceImportPaths = function() { return modifySourcesImports(settings); };
     var adaptSourceConstants = function() { return modifySourcesConstants(settings); };
     var adaptTsConfigImportPaths = function(cb) { return modifyTsConfig(settings, cb); };
@@ -298,9 +322,10 @@ function buildES6Library(settings, module) {
         ];
     }
 
-    tasks.push(...cleanAndShaderTasks, copySource, dependencies, adaptSourceImportPaths, adaptSourceConstants, adaptTsConfigImportPaths, ...buildSteps);
+    tasks.push(...cleanAndShaderTasks, copySource, dependencies, sharedUiComponents, adaptSourceImportPaths, adaptSourceConstants, adaptTsConfigImportPaths, ...buildSteps);
 
-    return gulp.series.apply(this, tasks);
+    tasks.map(t => t.displayName = module + "-es6:" + t.name);
+    return gulp.series(...tasks);
 }
 
 /**

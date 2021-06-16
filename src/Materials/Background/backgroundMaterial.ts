@@ -5,7 +5,7 @@ import { Logger } from "../../Misc/logger";
 import { Nullable, int, float } from "../../types";
 import { Scene } from "../../scene";
 import { Matrix, Vector3, Vector4 } from "../../Maths/math.vector";
-import { VertexBuffer } from "../../Meshes/buffer";
+import { VertexBuffer } from "../../Buffers/buffer";
 import { SubMesh } from "../../Meshes/subMesh";
 import { AbstractMesh } from "../../Meshes/abstractMesh";
 import { Mesh } from "../../Meshes/mesh";
@@ -163,6 +163,10 @@ class BackgroundMaterialDefines extends MaterialDefines implements IImageProcess
     public BonesPerMesh = 0;
     public INSTANCES = false;
     public SHADOWFLOAT = false;
+    public LOGARITHMICDEPTH = false;
+    public NONUNIFORMSCALING = false;
+    public ALPHATEST = false;
+    public USE_REVERSE_DEPTHBUFFER = false;
 
     /**
      * Constructor of the defines.
@@ -174,7 +178,7 @@ class BackgroundMaterialDefines extends MaterialDefines implements IImageProcess
 }
 
 /**
- * Background material used to create an efficient environement around your scene.
+ * Background material used to create an efficient environment around your scene.
  */
 export class BackgroundMaterial extends PushMaterial {
 
@@ -191,7 +195,7 @@ export class BackgroundMaterial extends PushMaterial {
     @serializeAsColor3()
     protected _primaryColor: Color3;
     /**
-     * Key light Color (multiply against the environement texture)
+     * Key light Color (multiply against the environment texture)
      */
     @expandToProperty("_markAllSubMeshesAsLightsDirty")
     public primaryColor = Color3.White();
@@ -235,7 +239,7 @@ export class BackgroundMaterial extends PushMaterial {
     @serialize()
     protected _primaryColorHighlightLevel: float = 0;
     /**
-     * Defines the level of the highliights (highlight area of the reflection map) in order to help scaling the colors.
+     * Defines the level of the highlights (highlight area of the reflection map) in order to help scaling the colors.
      * The primary color is used at the level chosen to define what the white area would look.
      */
     @expandToProperty("_markAllSubMeshesAsLightsDirty")
@@ -487,39 +491,39 @@ export class BackgroundMaterial extends PushMaterial {
     }
 
     /**
-     * Gets wether the color curves effect is enabled.
+     * Gets whether the color curves effect is enabled.
      */
     public get cameraColorCurvesEnabled(): boolean {
         return (<ImageProcessingConfiguration>this.imageProcessingConfiguration).colorCurvesEnabled;
     }
     /**
-     * Sets wether the color curves effect is enabled.
+     * Sets whether the color curves effect is enabled.
      */
     public set cameraColorCurvesEnabled(value: boolean) {
         (<ImageProcessingConfiguration>this.imageProcessingConfiguration).colorCurvesEnabled = value;
     }
 
     /**
-     * Gets wether the color grading effect is enabled.
+     * Gets whether the color grading effect is enabled.
      */
     public get cameraColorGradingEnabled(): boolean {
         return (<ImageProcessingConfiguration>this.imageProcessingConfiguration).colorGradingEnabled;
     }
     /**
-     * Gets wether the color grading effect is enabled.
+     * Gets whether the color grading effect is enabled.
      */
     public set cameraColorGradingEnabled(value: boolean) {
         (<ImageProcessingConfiguration>this.imageProcessingConfiguration).colorGradingEnabled = value;
     }
 
     /**
-     * Gets wether tonemapping is enabled or not.
+     * Gets whether tonemapping is enabled or not.
      */
     public get cameraToneMappingEnabled(): boolean {
         return this._imageProcessingConfiguration.toneMappingEnabled;
     }
     /**
-     * Sets wether tonemapping is enabled or not
+     * Sets whether tonemapping is enabled or not
      */
     public set cameraToneMappingEnabled(value: boolean) {
         this._imageProcessingConfiguration.toneMappingEnabled = value;
@@ -570,7 +574,7 @@ export class BackgroundMaterial extends PushMaterial {
     }
 
     /**
-     * The color grading curves provide additional color adjustmnent that is applied after any color grading transform (3D LUT).
+     * The color grading curves provide additional color adjustment that is applied after any color grading transform (3D LUT).
      * They allow basic adjustment of saturation and small exposure adjustments, along with color filter tinting to provide white balance adjustment or more stylistic effects.
      * These are similar to controls found in many professional imaging or colorist software. The global controls are applied to the entire image. For advanced tuning, extra controls are provided to adjust the shadow, midtone and highlight areas of the image;
      * corresponding to low luminance, medium luminance, and high luminance areas respectively.
@@ -579,7 +583,7 @@ export class BackgroundMaterial extends PushMaterial {
         return (<ImageProcessingConfiguration>this.imageProcessingConfiguration).colorCurves;
     }
     /**
-     * The color grading curves provide additional color adjustmnent that is applied after any color grading transform (3D LUT).
+     * The color grading curves provide additional color adjustment that is applied after any color grading transform (3D LUT).
      * They allow basic adjustment of saturation and small exposure adjustments, along with color filter tinting to provide white balance adjustment or more stylistic effects.
      * These are similar to controls found in many professional imaging or colorist software. The global controls are applied to the entire image. For advanced tuning, extra controls are provided to adjust the shadow, midtone and highlight areas of the image;
      * corresponding to low luminance, medium luminance, and high luminance areas respectively.
@@ -659,7 +663,7 @@ export class BackgroundMaterial extends PushMaterial {
     }
 
     /**
-     * Checks wether the material is ready to be rendered for a given mesh.
+     * Checks whether the material is ready to be rendered for a given mesh.
      * @param mesh The mesh to render
      * @param subMesh The submesh to check against
      * @param useInstances Specify wether or not the material is used with instances
@@ -673,7 +677,7 @@ export class BackgroundMaterial extends PushMaterial {
         }
 
         if (!subMesh._materialDefines) {
-            subMesh._materialDefines = new BackgroundMaterialDefines();
+            subMesh.materialDefines = new BackgroundMaterialDefines();
         }
 
         var scene = this.getScene();
@@ -913,11 +917,11 @@ export class BackgroundMaterial extends PushMaterial {
                     this.onCompiled(effect);
                 }
 
-                this.bindSceneUniformBuffer(effect, scene.getSceneUniformBuffer());
+                MaterialHelper.BindSceneUniformBuffer(effect, scene.getSceneUniformBuffer());
             };
 
             var join = defines.toString();
-            subMesh.setEffect(scene.getEngine().createEffect("background", <IEffectCreationOptions>{
+            const effect = scene.getEngine().createEffect("background", <IEffectCreationOptions>{
                 attributes: attribs,
                 uniformsNames: uniforms,
                 uniformBuffersNames: uniformBuffers,
@@ -927,7 +931,8 @@ export class BackgroundMaterial extends PushMaterial {
                 onCompiled: onCompiled,
                 onError: this.onError,
                 indexParameters: { maxSimultaneousLights: this._maxSimultaneousLights }
-            }, engine), defines);
+            }, engine);
+            subMesh.setEffect(effect, defines, this._materialContext);
 
             this.buildUniformLayout();
         }
@@ -1129,12 +1134,12 @@ export class BackgroundMaterial extends PushMaterial {
             // Clip plane
             MaterialHelper.BindClipPlane(this._activeEffect, scene);
 
-            MaterialHelper.BindEyePosition(effect, scene);
+            scene.bindEyePosition(effect);
         }
 
         if (mustRebind || !this.isFrozen) {
             if (scene.lightsEnabled) {
-                MaterialHelper.BindLights(scene, mesh, this._activeEffect, defines, this._maxSimultaneousLights, false);
+                MaterialHelper.BindLights(scene, mesh, this._activeEffect, defines, this._maxSimultaneousLights);
             }
 
             // View
@@ -1149,9 +1154,9 @@ export class BackgroundMaterial extends PushMaterial {
             }
         }
 
-        this._uniformBuffer.update();
-
         this._afterBind(mesh, this._activeEffect);
+
+        this._uniformBuffer.update();
     }
 
     /**

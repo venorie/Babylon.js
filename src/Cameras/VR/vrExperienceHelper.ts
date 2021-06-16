@@ -474,12 +474,12 @@ export class VRExperienceHelper {
     private _raySelectionPredicate: (mesh: AbstractMesh) => boolean;
 
     /**
-     * To be optionaly changed by user to define custom ray selection
+     * To be optionally changed by user to define custom ray selection
      */
     public raySelectionPredicate: (mesh: AbstractMesh) => boolean;
 
     /**
-     * To be optionaly changed by user to define custom selection logic (after ray selection)
+     * To be optionally changed by user to define custom selection logic (after ray selection)
      */
     public meshSelectionPredicate: (mesh: AbstractMesh) => boolean;
 
@@ -716,14 +716,15 @@ export class VRExperienceHelper {
     constructor(scene: Scene,
         /** Options to modify the vr experience helper's behavior. */
         public webVROptions: VRExperienceHelperOptions = {}) {
+        Logger.Warn('WebVR is deprecated. Please avoid using this experience helper and use the WebXR experience helper instead');
         this._scene = scene;
         this._inputElement = scene.getEngine().getInputElement();
 
         // check for VR support:
 
         const vrSupported = 'getVRDisplays' in navigator;
-        // no VR support? force XR
-        if (!vrSupported) {
+        // no VR support? force XR but only when it is not set because web vr can work without the getVRDisplays
+        if (!vrSupported && webVROptions.useXR === undefined) {
             webVROptions.useXR = true;
         }
 
@@ -787,7 +788,7 @@ export class VRExperienceHelper {
 
             this._scene.activeCamera = this._deviceOrientationCamera;
             if (this._inputElement) {
-                this._scene.activeCamera.attachControl(this._inputElement);
+                this._scene.activeCamera.attachControl();
             }
         } else {
             this._existingCamera = this._scene.activeCamera;
@@ -1180,7 +1181,7 @@ export class VRExperienceHelper {
         }
 
         if (this._scene.activeCamera && this._inputElement) {
-            this._scene.activeCamera.attachControl(this._inputElement);
+            this._scene.activeCamera.attachControl();
         }
 
         if (this._interactionsEnabled) {
@@ -1248,7 +1249,7 @@ export class VRExperienceHelper {
                 this._existingCamera.position = this._position;
                 this._scene.activeCamera = this._existingCamera;
                 if (this._inputElement) {
-                    this._scene.activeCamera.attachControl(this._inputElement);
+                    this._scene.activeCamera.attachControl();
                 }
 
                 // Restore angular sensibility

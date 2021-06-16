@@ -48,3 +48,5 @@ export * from "./desaturateBlock";
 export * from "./PBR/index";
 export * from "./Particle/index";
 export * from "./modBlock";
+export * from "./matrixBuilderBlock";
+export * from "./conditionalBlock";

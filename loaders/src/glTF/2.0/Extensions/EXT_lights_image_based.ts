@@ -45,7 +45,7 @@ export class EXT_lights_image_based implements IGLTFLoaderExtension {
 
     /** @hidden */
     public dispose() {
-        delete this._loader;
+        (this._loader as any) = null;
         delete this._lights;
     }
 
@@ -122,6 +122,10 @@ export class EXT_lights_image_based implements IGLTFLoaderExtension {
                     }
 
                     Matrix.FromQuaternionToRef(rotation, babylonTexture.getReflectionTextureMatrix());
+                }
+
+                if (!light.irradianceCoefficients) {
+                    throw new Error(`${context}: Irradiance coefficients are missing`);
                 }
 
                 const sphericalHarmonics = SphericalHarmonics.FromArray(light.irradianceCoefficients);

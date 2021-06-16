@@ -2,12 +2,13 @@ import { Nullable } from '../types';
 import { InternalTexture } from './Textures/internalTexture';
 import { RenderTargetTexture } from './Textures/renderTargetTexture';
 import { ThinEngine } from '../Engines/thinEngine';
-import { VertexBuffer } from '../Meshes/buffer';
+import { VertexBuffer } from '../Buffers/buffer';
 import { Viewport } from '../Maths/math.viewport';
 import { Constants } from '../Engines/constants';
-import { Observable } from '../Misc/observable';
+import { Observable, Observer } from '../Misc/observable';
 import { Effect } from './effect';
-import { DataBuffer } from '../Meshes/dataBuffer';
+import { DataBuffer } from '../Buffers/dataBuffer';
+import { DrawWrapper } from "./drawWrapper";
 
 // Prevents ES6 Crash if not imported.
 import "../Shaders/postprocess.vertex";
@@ -41,6 +42,7 @@ export class EffectRenderer {
     private _indexBuffer: DataBuffer;
 
     private _fullscreenViewport = new Viewport(0, 0, 1, 1);
+    private _onContextRestoredObserver: Nullable<Observer<ThinEngine>>;
 
     /**
      * Creates an effect renderer
@@ -57,6 +59,15 @@ export class EffectRenderer {
             [VertexBuffer.PositionKind]: new VertexBuffer(engine, options.positions!, VertexBuffer.PositionKind, false, false, 2),
         };
         this._indexBuffer = engine.createIndexBuffer(options.indices!);
+
+        this._onContextRestoredObserver = engine.onContextRestoredObservable.add(() => {
+            this._indexBuffer = engine.createIndexBuffer(options.indices!);
+
+            for (const key in this._vertexBuffers) {
+                const vertexBuffer = <VertexBuffer>this._vertexBuffers[key];
+                vertexBuffer._rebuild();
+            }
+        });
     }
 
     /**
@@ -84,7 +95,7 @@ export class EffectRenderer {
     public applyEffectWrapper(effectWrapper: EffectWrapper): void {
         this.engine.depthCullingState.depthTest = false;
         this.engine.stencilState.stencilTest = false;
-        this.engine.enableEffect(effectWrapper.effect);
+        this.engine.enableEffect(effectWrapper._drawWrapper);
         this.bindBuffers(effectWrapper.effect);
         effectWrapper.onApplyObservable.notifyObservers({});
     }
@@ -152,6 +163,11 @@ export class EffectRenderer {
         if (this._indexBuffer) {
             this.engine._releaseBuffer(this._indexBuffer);
         }
+
+        if (this._onContextRestoredObserver) {
+            this.engine.onContextRestoredObservable.remove(this._onContextRestoredObserver);
+            this._onContextRestoredObserver = null;
+        }
     }
 }
 
@@ -212,7 +228,18 @@ export class EffectWrapper {
     /**
      * The underlying effect
      */
-    public effect: Effect;
+    public get effect(): Effect {
+        return this._drawWrapper.effect!;
+    }
+
+    public set effect(effect: Effect) {
+        this._drawWrapper.effect = effect;
+    }
+
+    /** @hidden */
+    public _drawWrapper: DrawWrapper;
+
+    private _onContextRestoredObserver: Nullable<Observer<ThinEngine>>;
 
     /**
      * Creates an effect to be renderer
@@ -246,6 +273,7 @@ export class EffectWrapper {
         }
 
         const defines = creationOptions.defines ? creationOptions.defines.join("\n") : "";
+        this._drawWrapper = new DrawWrapper(creationOptions.engine);
 
         if (creationOptions.useShaderStore) {
             effectCreationOptions.fragment = effectCreationOptions.fragmentSource;
@@ -274,6 +302,12 @@ export class EffectWrapper {
                 undefined,
                 creationOptions.onCompiled,
             );
+
+            this._onContextRestoredObserver = creationOptions.engine.onContextRestoredObservable.add(() => {
+                this.effect._pipelineContext = null; // because _prepareEffect will try to dispose this pipeline before recreating it and that would lead to webgl errors
+                this.effect._wasPreviouslyReady = false;
+                this.effect._prepareEffect();
+            });
         }
     }
 
@@ -281,6 +315,10 @@ export class EffectWrapper {
     * Disposes of the effect wrapper
     */
     public dispose() {
+        if (this._onContextRestoredObserver) {
+            this.effect.getEngine().onContextRestoredObservable.remove(this._onContextRestoredObserver);
+            this._onContextRestoredObserver = null;
+        }
         this.effect.dispose();
     }
 }

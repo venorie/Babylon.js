@@ -1,5 +1,5 @@
 import { Scene } from "../scene";
-import { VertexBuffer } from "../Meshes/buffer";
+import { VertexBuffer } from "../Buffers/buffer";
 import { SubMesh } from "../Meshes/subMesh";
 import { AbstractMesh } from "../Meshes/abstractMesh";
 import { VertexData } from "../Meshes/mesh.vertexData";
@@ -16,7 +16,7 @@ import "../Meshes/Builders/boxBuilder";
 
 import "../Shaders/color.fragment";
 import "../Shaders/color.vertex";
-import { DataBuffer } from '../Meshes/dataBuffer';
+import { DataBuffer } from '../Buffers/dataBuffer';
 import { Color3 } from '../Maths/math.color';
 import { Observable } from '../Misc/observable';
 
@@ -98,7 +98,7 @@ Object.defineProperty(AbstractMesh.prototype, "showBoundingBox", {
  */
 export class BoundingBoxRenderer implements ISceneComponent {
     /**
-     * The component name helpfull to identify the component in the list of scene components.
+     * The component name helpful to identify the component in the list of scene components.
      */
     public readonly name = SceneComponentConstants.NAME_BOUNDINGBOXRENDERER;
 
@@ -131,6 +131,16 @@ export class BoundingBoxRenderer implements ISceneComponent {
     public onAfterBoxRenderingObservable = new Observable<BoundingBox>();
 
     /**
+     * Observable raised after resources are created
+     */
+    public onResourcesReadyObservable = new Observable<BoundingBoxRenderer>();
+
+    /**
+     * When false, no bounding boxes will be rendered
+     */
+    public enabled = true;
+
+    /**
      * @hidden
      */
     public renderList = new SmartArray<BoundingBox>(32);
@@ -156,7 +166,7 @@ export class BoundingBoxRenderer implements ISceneComponent {
     public register(): void {
         this.scene._beforeEvaluateActiveMeshStage.registerStep(SceneComponentConstants.STEP_BEFOREEVALUATEACTIVEMESH_BOUNDINGBOXRENDERER, this, this.reset);
 
-        this.scene._activeMeshStage.registerStep(SceneComponentConstants.STEP_ACTIVEMESH_BOUNDINGBOXRENDERER, this, this._activeMesh);
+        this.scene._preActiveMeshStage.registerStep(SceneComponentConstants.STEP_PREACTIVEMESH_BOUNDINGBOXRENDERER, this, this._preActiveMesh);
 
         this.scene._evaluateSubMeshStage.registerStep(SceneComponentConstants.STEP_EVALUATESUBMESH_BOUNDINGBOXRENDERER, this, this._evaluateSubMesh);
 
@@ -173,15 +183,15 @@ export class BoundingBoxRenderer implements ISceneComponent {
         }
     }
 
-    private _activeMesh(sourceMesh: AbstractMesh, mesh: AbstractMesh): void {
-        if (sourceMesh.showBoundingBox || this.scene.forceShowBoundingBoxes) {
-            let boundingInfo = sourceMesh.getBoundingInfo();
+    private _preActiveMesh(mesh: AbstractMesh): void {
+        if (mesh.showBoundingBox || this.scene.forceShowBoundingBoxes) {
+            let boundingInfo = mesh.getBoundingInfo();
             boundingInfo.boundingBox._tag = mesh.renderingGroupId;
             this.renderList.push(boundingInfo.boundingBox);
         }
     }
 
-    private _prepareRessources(): void {
+    private _prepareResources(): void {
         if (this._colorShader) {
             return;
         }
@@ -200,6 +210,7 @@ export class BoundingBoxRenderer implements ISceneComponent {
         this._vertexBuffers[VertexBuffer.PositionKind] = new VertexBuffer(engine, <FloatArray>boxdata.positions, VertexBuffer.PositionKind, false);
         this._createIndexBuffer();
         this._fillIndexData = boxdata.indices;
+        this.onResourcesReadyObservable.notifyObservers(this);
     }
 
     private _createIndexBuffer(): void {
@@ -231,11 +242,11 @@ export class BoundingBoxRenderer implements ISceneComponent {
      * @param renderingGroupId defines the rendering group to render
      */
     public render(renderingGroupId: number): void {
-        if (this.renderList.length === 0) {
+        if (this.renderList.length === 0 || !this.enabled) {
             return;
         }
 
-        this._prepareRessources();
+        this._prepareResources();
 
         if (!this._colorShader.isReady()) {
             return;
@@ -244,6 +255,7 @@ export class BoundingBoxRenderer implements ISceneComponent {
         var engine = this.scene.getEngine();
         engine.setDepthWrite(false);
         this._colorShader._preBind();
+
         for (var boundingBoxIndex = 0; boundingBoxIndex < this.renderList.length; boundingBoxIndex++) {
             var boundingBox = this.renderList.data[boundingBoxIndex];
             if (boundingBox._tag !== renderingGroupId) {
@@ -264,9 +276,15 @@ export class BoundingBoxRenderer implements ISceneComponent {
             // VBOs
             engine.bindBuffers(this._vertexBuffers, this._indexBuffer, <Effect>this._colorShader.getEffect());
 
+            const useReverseDepthBuffer = engine.useReverseDepthBuffer;
+
             if (this.showBackLines) {
                 // Back
-                engine.setDepthFunctionToGreaterOrEqual();
+                if (useReverseDepthBuffer) {
+                    engine.setDepthFunctionToLessOrEqual();
+                } else {
+                    engine.setDepthFunctionToGreaterOrEqual();
+                }
                 this.scene.resetCachedMaterial();
                 this._colorShader.setColor4("color", this.backColor.toColor4());
                 this._colorShader.bind(worldMatrix);
@@ -276,7 +294,11 @@ export class BoundingBoxRenderer implements ISceneComponent {
             }
 
             // Front
-            engine.setDepthFunctionToLess();
+            if (useReverseDepthBuffer) {
+                engine.setDepthFunctionToGreater();
+            } else {
+                engine.setDepthFunctionToLess();
+            }
             this.scene.resetCachedMaterial();
             this._colorShader.setColor4("color", this.frontColor.toColor4());
             this._colorShader.bind(worldMatrix);
@@ -297,7 +319,7 @@ export class BoundingBoxRenderer implements ISceneComponent {
      */
     public renderOcclusionBoundingBox(mesh: AbstractMesh): void {
 
-        this._prepareRessources();
+        this._prepareResources();
 
         if (!this._colorShader.isReady() || !mesh._boundingInfo) {
             return;
@@ -346,6 +368,7 @@ export class BoundingBoxRenderer implements ISceneComponent {
 
         this.onBeforeBoxRenderingObservable.clear();
         this.onAfterBoxRenderingObservable.clear();
+        this.onResourcesReadyObservable.clear();
 
         this.renderList.dispose();
 

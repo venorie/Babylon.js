@@ -31,7 +31,7 @@ declare module "../scene" {
 
 Object.defineProperty(Scene.prototype, "geometryBufferRenderer", {
     get: function(this: Scene) {
-        this._geometryBufferRenderer;
+        return this._geometryBufferRenderer;
     },
     set: function(this: Scene, value: Nullable<GeometryBufferRenderer>) {
         if (value && value.isSupported) {
@@ -103,7 +103,7 @@ export class GeometryBufferRendererSceneComponent implements ISceneComponent {
     }
 
     /**
-     * Disposes the component and the associated ressources
+     * Disposes the component and the associated resources
      */
     public dispose(): void {
         // Nothing to do for this component

@@ -1,10 +1,9 @@
 import { Nullable } from "../types";
-import { Material } from "../Materials/material";
 import { InternalTexture } from "../Materials/Textures/internalTexture";
 import { PostProcess } from "./postProcess";
-import { VertexBuffer } from "../Meshes/buffer";
+import { VertexBuffer } from "../Buffers/buffer";
 import { Constants } from "../Engines/constants";
-import { DataBuffer } from '../Meshes/dataBuffer';
+import { DataBuffer } from '../Buffers/dataBuffer';
 
 declare type Scene = import("../scene").Scene;
 
@@ -73,7 +72,7 @@ export class PostProcessManager {
     // Methods
     /**
      * Prepares a frame to be run through a post process.
-     * @param sourceTexture The input texture to the post procesess. (default: null)
+     * @param sourceTexture The input texture to the post processes. (default: null)
      * @param postProcesses An array of post processes to be run. (default: null)
      * @returns True if the post processes were able to be run.
      * @hidden
@@ -116,6 +115,7 @@ export class PostProcessManager {
                 } else if (!doNotBindFrambuffer) {
                     engine.restoreDefaultFramebuffer();
                 }
+                engine._debugInsertMarker?.(`post process ${postProcesses[index].name} output`);
             }
 
             var pp = postProcesses[index];
@@ -129,7 +129,7 @@ export class PostProcessManager {
                 engine.bindBuffers(this._vertexBuffers, this._indexBuffer, effect);
 
                 // Draw order
-                engine.drawElementsType(Material.TriangleFillMode, 0, 6);
+                engine.drawElementsType(Constants.MATERIAL_TriangleFillMode, 0, 6);
 
                 pp.onAfterRenderObservable.notifyObservers(effect);
             }
@@ -175,6 +175,7 @@ export class PostProcessManager {
                     engine.restoreDefaultFramebuffer();
                     pp._outputTexture = null;
                 }
+                engine._debugInsertMarker?.(`post process ${postProcesses[index].name} output`);
             }
 
             if (doNotPresent) {
@@ -191,7 +192,7 @@ export class PostProcessManager {
                 engine.bindBuffers(this._vertexBuffers, this._indexBuffer, effect);
 
                 // Draw order
-                engine.drawElementsType(Material.TriangleFillMode, 0, 6);
+                engine.drawElementsType(Constants.MATERIAL_TriangleFillMode, 0, 6);
 
                 pp.onAfterRenderObservable.notifyObservers(effect);
             }

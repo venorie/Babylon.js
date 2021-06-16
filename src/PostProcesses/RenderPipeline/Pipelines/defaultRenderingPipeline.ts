@@ -1,6 +1,6 @@
 import { Nullable } from "../../../types";
 import { serialize, SerializationHelper } from "../../../Misc/decorators";
-import { Observer } from "../../../Misc/observable";
+import { Observable, Observer } from "../../../Misc/observable";
 import { IAnimatable } from '../../../Animations/animatable.interface';
 import { Logger } from "../../../Misc/logger";
 import { Camera } from "../../../Cameras/camera";
@@ -70,7 +70,7 @@ export class DefaultRenderingPipeline extends PostProcessRenderPipeline implemen
      */
     public depthOfField: DepthOfFieldEffect;
     /**
-     * The Fast Approximate Anti-Aliasing post process which attemps to remove aliasing from an image.
+     * The Fast Approximate Anti-Aliasing post process which attempts to remove aliasing from an image.
      */
     public fxaa: FxaaPostProcess;
     /**
@@ -111,6 +111,11 @@ export class DefaultRenderingPipeline extends PostProcessRenderPipeline implemen
     private _grainEnabled: boolean = false;
 
     private _buildAllowed = true;
+
+    /**
+     * This is triggered each time the pipeline has been built.
+     */
+    public onBuildObservable = new Observable<DefaultRenderingPipeline>();
 
     /**
      * Gets active scene
@@ -581,6 +586,14 @@ export class DefaultRenderingPipeline extends PostProcessRenderPipeline implemen
             } else {
                 this._scene.imageProcessingConfiguration.applyByPostProcess = false;
             }
+
+            if (!this.cameras || this.cameras.length === 0) {
+                this._scene.imageProcessingConfiguration.applyByPostProcess = false;
+            }
+
+            if (!this.imageProcessing.getEffect()) {
+                this.imageProcessing._updateParameters();
+            }
         }
 
         if (this.sharpenEnabled) {
@@ -625,6 +638,8 @@ export class DefaultRenderingPipeline extends PostProcessRenderPipeline implemen
         if (!this._enableMSAAOnFirstPostProcess(this.samples) && this.samples > 1) {
             Logger.Warn("MSAA failed to enable, MSAA is only supported in browsers that support webGL >= 2.0");
         }
+
+        this.onBuildObservable.notifyObservers(this);
     }
 
     private _disposePostProcesses(disposeNonRecreated = false): void {
@@ -706,6 +721,7 @@ export class DefaultRenderingPipeline extends PostProcessRenderPipeline implemen
      * Dispose of the pipeline and stop all post processes
      */
     public dispose(): void {
+        this.onBuildObservable.clear();
         this._disposePostProcesses(true);
         this._scene.postProcessRenderPipelineManager.detachCamerasFromRenderPipeline(this._name, this._cameras);
         this._scene.autoClear = true;

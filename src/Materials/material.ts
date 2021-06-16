@@ -4,7 +4,6 @@ import { IAnimatable } from '../Animations/animatable.interface';
 import { SmartArray } from "../Misc/smartArray";
 import { Observer, Observable } from "../Misc/observable";
 import { Nullable } from "../types";
-import { Scene } from "../scene";
 import { Matrix } from "../Maths/math.vector";
 import { EngineStore } from "../Engines/engineStore";
 import { SubMesh } from "../Meshes/subMesh";
@@ -20,7 +19,14 @@ import { Logger } from "../Misc/logger";
 import { IInspectable } from '../Misc/iInspectable';
 import { Plane } from '../Maths/math.plane';
 import { ShadowDepthWrapper } from './shadowDepthWrapper';
+import { MaterialHelper } from './materialHelper';
+import { IMaterialContext } from "../Engines/IMaterialContext";
+import { DrawWrapper } from "./drawWrapper";
+import { MaterialStencilState } from "./materialStencilState";
+import { Scene } from "../scene";
+import { AbstractScene } from "../abstractScene";
 
+declare type PrePassRenderer = import("../Rendering/prePassRenderer").PrePassRenderer;
 declare type Mesh = import("../Meshes/mesh").Mesh;
 declare type Animation = import("../Animations/animation").Animation;
 declare type InstancedMesh = import('../Meshes/instancedMesh').InstancedMesh;
@@ -129,6 +135,11 @@ export class Material implements IAnimatable {
     public static readonly MiscDirtyFlag = Constants.MATERIAL_MiscDirtyFlag;
 
     /**
+     * The dirty prepass flag value
+     */
+    public static readonly PrePassDirtyFlag = Constants.MATERIAL_PrePassDirtyFlag;
+
+    /**
      * The all dirty flag value
      */
     public static readonly AllDirtyFlag = Constants.MATERIAL_AllDirtyFlag;
@@ -204,6 +215,7 @@ export class Material implements IAnimatable {
     /**
      * Gets or sets user defined metadata
      */
+    @serialize()
     public metadata: any = null;
 
     /**
@@ -230,9 +242,9 @@ export class Material implements IAnimatable {
     public state = "";
 
     /**
-     * If the material should be rendered to several textures with MRT extension
+     * If the material can be rendered to several textures with MRT extension
      */
-    public get shouldRenderToMRT() : boolean {
+    public get canRenderToMRT() : boolean {
         // By default, shaders are not compatible with MRTs
         // Base classes should override that if their shader supports MRT
         return false;
@@ -275,7 +287,7 @@ export class Material implements IAnimatable {
     protected _backFaceCulling = true;
 
     /**
-     * Sets the back-face culling state
+     * Sets the culling state (true to enable culling, false to disable)
      */
     public set backFaceCulling(value: boolean) {
         if (this._backFaceCulling === value) {
@@ -286,13 +298,37 @@ export class Material implements IAnimatable {
     }
 
     /**
-     * Gets the back-face culling state
+     * Gets the culling state
      */
     public get backFaceCulling(): boolean {
         return this._backFaceCulling;
     }
 
     /**
+     * Specifies if back or front faces should be culled (when culling is enabled)
+     */
+     @serialize("cullBackFaces")
+     protected _cullBackFaces = true;
+
+     /**
+      * Sets the type of faces that should be culled (true for back faces, false for front faces)
+      */
+     public set cullBackFaces(value: boolean) {
+         if (this._cullBackFaces === value) {
+             return;
+         }
+         this._cullBackFaces = value;
+         this.markAsDirty(Material.TextureDirtyFlag);
+     }
+
+     /**
+      * Gets the type of faces that should be culled
+      */
+     public get cullBackFaces(): boolean {
+         return this._cullBackFaces;
+     }
+
+     /**
      * Stores the value for side orientation
      */
     @serialize()
@@ -474,6 +510,13 @@ export class Material implements IAnimatable {
     }
 
     /**
+     * Can this material render to prepass
+     */
+    public get isPrePassCapable(): boolean {
+        return false;
+    }
+
+    /**
      * Specifies if depth writing should be disabled
      */
     @serialize()
@@ -504,7 +547,7 @@ export class Material implements IAnimatable {
     public separateCullingPass = false;
 
     /**
-     * Stores the state specifing if fog should be enabled
+     * Stores the state specifying if fog should be enabled
      */
     @serialize("fogEnabled")
     private _fogEnabled = true;
@@ -600,10 +643,21 @@ export class Material implements IAnimatable {
     }
 
     /**
+     * Gives access to the stencil properties of the material
+     */
+    public readonly stencil = new MaterialStencilState();
+
+    /**
      * @hidden
      * Stores the effects for the material
      */
-    public _effect: Nullable<Effect> = null;
+    protected _materialContext: IMaterialContext | undefined;
+
+    protected _drawWrapper: DrawWrapper;
+    /** @hidden */
+    public _getDrawWrapper(): DrawWrapper {
+        return this._drawWrapper;
+    }
 
     /**
      * Specifies if uniform buffers should be used
@@ -614,6 +668,7 @@ export class Material implements IAnimatable {
      * Stores a reference to the scene
      */
     private _scene: Scene;
+    private _needToBindSceneUbo: boolean;
 
     /**
      * Stores the fill mode state
@@ -646,6 +701,9 @@ export class Material implements IAnimatable {
     /** @hidden */
     public meshMap: Nullable<{ [id: string]: AbstractMesh | undefined }> = null;
 
+    /** @hidden */
+    public _parentContainer: Nullable<AbstractScene> = null;
+
     /**
      * Creates a material instance
      * @param name defines the name of the material
@@ -654,10 +712,13 @@ export class Material implements IAnimatable {
      */
     constructor(name: string, scene: Scene, doNotAdd?: boolean) {
         this.name = name;
-        this.id = name || Tools.RandomId();
-
         this._scene = scene || EngineStore.LastCreatedScene;
+
+        this.id = name || Tools.RandomId();
         this.uniqueId = this._scene.getUniqueId();
+        this._materialContext = this._scene.getEngine().createMaterialContext();
+        this._drawWrapper = new DrawWrapper(this._scene.getEngine(), false);
+        this._drawWrapper.materialContext = this._materialContext;
 
         if (this._scene.useRightHandedSystem) {
             this.sideOrientation = Material.ClockWiseSideOrientation;
@@ -665,7 +726,7 @@ export class Material implements IAnimatable {
             this.sideOrientation = Material.CounterClockWiseSideOrientation;
         }
 
-        this._uniformBuffer = new UniformBuffer(this._scene.getEngine());
+        this._uniformBuffer = new UniformBuffer(this._scene.getEngine(), undefined, undefined, name);
         this._useUBO = this.getScene().getEngine().supportsUniformBuffers;
 
         if (!doNotAdd) {
@@ -746,7 +807,7 @@ export class Material implements IAnimatable {
      * @returns the effect associated with the material
      */
     public getEffect(): Nullable<Effect> {
-        return this._effect;
+        return this._drawWrapper.effect;
     }
 
     /**
@@ -883,14 +944,14 @@ export class Material implements IAnimatable {
     }
 
     /** @hidden */
-    public _preBind(effect?: Effect, overrideOrientation: Nullable<number> = null): boolean {
+    public _preBind(effect?: Effect | DrawWrapper, overrideOrientation: Nullable<number> = null): boolean {
         var engine = this._scene.getEngine();
 
         var orientation = (overrideOrientation == null) ? this.sideOrientation : overrideOrientation;
         var reverse = orientation === Material.ClockWiseSideOrientation;
 
-        engine.enableEffect(effect ? effect : this._effect);
-        engine.setState(this.backFaceCulling, this.zOffset, false, reverse);
+        engine.enableEffect(effect ? effect : this._getDrawWrapper());
+        engine.setState(this.backFaceCulling, this.zOffset, false, reverse, this.cullBackFaces, this.stencil);
 
         return reverse;
     }
@@ -920,15 +981,6 @@ export class Material implements IAnimatable {
     }
 
     /**
-     * Binds the scene's uniform buffer to the effect.
-     * @param effect defines the effect to bind to the scene uniform buffer
-     * @param sceneUbo defines the uniform buffer storing scene data
-     */
-    public bindSceneUniformBuffer(effect: Effect, sceneUbo: UniformBuffer): void {
-        sceneUbo.bindToEffect(effect, "Scene");
-    }
-
-    /**
      * Binds the view matrix to the effect
      * @param effect defines the effect to bind the view matrix to
      */
@@ -936,19 +988,33 @@ export class Material implements IAnimatable {
         if (!this._useUBO) {
             effect.setMatrix("view", this.getScene().getViewMatrix());
         } else {
-            this.bindSceneUniformBuffer(effect, this.getScene().getSceneUniformBuffer());
+            this._needToBindSceneUbo = true;
         }
     }
 
     /**
-     * Binds the view projection matrix to the effect
-     * @param effect defines the effect to bind the view projection matrix to
+     * Binds the view projection and projection matrices to the effect
+     * @param effect defines the effect to bind the view projection and projection matrices to
      */
     public bindViewProjection(effect: Effect): void {
         if (!this._useUBO) {
             effect.setMatrix("viewProjection", this.getScene().getTransformMatrix());
+            effect.setMatrix("projection", this.getScene().getProjectionMatrix());
         } else {
-            this.bindSceneUniformBuffer(effect, this.getScene().getSceneUniformBuffer());
+            this._needToBindSceneUbo = true;
+        }
+    }
+
+    /**
+     * Binds the view matrix to the effect
+     * @param effect defines the effect to bind the view matrix to
+     * @param variableName name of the shader variable that will hold the eye position
+     */
+    public bindEyePosition(effect: Effect, variableName?: string): void {
+        if (!this._useUBO) {
+            this._scene.bindEyePosition(effect, variableName);
+        } else {
+            this._needToBindSceneUbo = true;
         }
     }
 
@@ -956,8 +1022,15 @@ export class Material implements IAnimatable {
      * Processes to execute after binding the material to a mesh
      * @param mesh defines the rendered mesh
      */
-    protected _afterBind(mesh?: Mesh): void {
+    protected _afterBind(mesh?: Mesh, effect: Nullable<Effect> = null): void {
         this._scene._cachedMaterial = this;
+        if (this._needToBindSceneUbo) {
+            if (effect) {
+                this._needToBindSceneUbo = false;
+                this._scene.finalizeSceneUbo();
+                MaterialHelper.BindSceneUniformBuffer(effect, this.getScene().getSceneUniformBuffer());
+            }
+        }
         if (mesh) {
             this._scene._cachedVisibility = mesh.visibility;
         } else {
@@ -1155,6 +1228,7 @@ export class Material implements IAnimatable {
     private static readonly _TextureDirtyCallBack = (defines: MaterialDefines) => defines.markAsTexturesDirty();
     private static readonly _FresnelDirtyCallBack = (defines: MaterialDefines) => defines.markAsFresnelDirty();
     private static readonly _MiscDirtyCallBack = (defines: MaterialDefines) => defines.markAsMiscDirty();
+    private static readonly _PrePassDirtyCallBack = (defines: MaterialDefines) => defines.markAsPrePassDirty();
     private static readonly _LightsDirtyCallBack = (defines: MaterialDefines) => defines.markAsLightDirty();
     private static readonly _AttributeDirtyCallBack = (defines: MaterialDefines) => defines.markAsAttributesDirty();
 
@@ -1204,6 +1278,10 @@ export class Material implements IAnimatable {
 
         if (flag & Material.MiscDirtyFlag) {
             Material._DirtyCallbackArray.push(Material._MiscDirtyCallBack);
+        }
+
+        if (flag & Material.PrePassDirtyFlag) {
+            Material._DirtyCallbackArray.push(Material._PrePassDirtyCallBack);
         }
 
         if (Material._DirtyCallbackArray.length) {
@@ -1312,10 +1390,27 @@ export class Material implements IAnimatable {
     }
 
     /**
+     * Indicates that prepass needs to be re-calculated for all submeshes
+     */
+    protected _markAllSubMeshesAsPrePassDirty() {
+        this._markAllSubMeshesAsDirty(Material._MiscDirtyCallBack);
+    }
+
+    /**
      * Indicates that textures and misc need to be re-calculated for all submeshes
      */
     protected _markAllSubMeshesAsTexturesAndMiscDirty() {
         this._markAllSubMeshesAsDirty(Material._TextureAndMiscDirtyCallBack);
+    }
+
+    /**
+     * Sets the required values to the prepass renderer.
+     * @param prePassRenderer defines the prepass renderer to setup.
+     * @returns true if the pre pass is needed.
+     */
+    public setPrePassRenderer(prePassRenderer: PrePassRenderer): boolean {
+        // Do Nothing by default
+        return false;
     }
 
     /**
@@ -1332,6 +1427,14 @@ export class Material implements IAnimatable {
 
         // Remove from scene
         scene.removeMaterial(this);
+
+        if (this._parentContainer) {
+            const index = this._parentContainer.materials.indexOf(this);
+            if (index > -1) {
+                this._parentContainer.materials.splice(index, 1);
+            }
+            this._parentContainer = null;
+        }
 
         if (notBoundToMesh !== true) {
             // Remove from meshes
@@ -1358,13 +1461,15 @@ export class Material implements IAnimatable {
         this._uniformBuffer.dispose();
 
         // Shader are kept in cache for further use but we can get rid of this by using forceDisposeEffect
-        if (forceDisposeEffect && this._effect) {
+        if (forceDisposeEffect && this._drawWrapper.effect) {
             if (!this._storeEffectOnSubMeshes) {
-                this._effect.dispose();
+                this._drawWrapper.effect.dispose();
             }
 
-            this._effect = null;
+            this._drawWrapper.effect = null;
         }
+
+        this.metadata = null;
 
         // Callback
         this.onDisposeObservable.notifyObservers(this);
@@ -1395,7 +1500,7 @@ export class Material implements IAnimatable {
                     }
                 }
             } else {
-                geometry._releaseVertexArrayObject(this._effect);
+                geometry._releaseVertexArrayObject(this._drawWrapper.effect);
             }
         }
     }
@@ -1405,7 +1510,11 @@ export class Material implements IAnimatable {
      * @returns the serialized material object
      */
     public serialize(): any {
-        return SerializationHelper.Serialize(this);
+        const serializationObject = SerializationHelper.Serialize(this);
+
+        serializationObject.stencil = this.stencil.serialize();
+
+        return serializationObject;
     }
 
     /**

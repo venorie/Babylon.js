@@ -9,6 +9,7 @@ import { PickingInfo } from "../Collisions/pickingInfo";
 import { ISceneComponent, SceneComponentConstants } from "../sceneComponent";
 import { ActionEvent } from "../Actions/actionEvent";
 import { Constants } from "../Engines/constants";
+import { IPointerEvent } from "../Events/deviceInputEvents";
 
 declare module "../scene" {
     export interface Scene {
@@ -171,9 +172,18 @@ Scene.prototype._internalMultiPickSprites = function(ray: Ray, predicate?: (spri
 };
 
 Scene.prototype.pickSprite = function(x: number, y: number, predicate?: (sprite: Sprite) => boolean, fastCheck?: boolean, camera?: Camera): Nullable<PickingInfo> {
-    this.createPickingRayInCameraSpaceToRef(x, y, this._tempSpritePickingRay!, camera);
+    if (!this._tempSpritePickingRay) {
+        return null;
+    }
 
-    return this._internalPickSprites(this._tempSpritePickingRay!, predicate, fastCheck, camera);
+    this.createPickingRayInCameraSpaceToRef(x, y, this._tempSpritePickingRay, camera);
+
+    const result = this._internalPickSprites(this._tempSpritePickingRay, predicate, fastCheck, camera);
+    if (result) {
+        result.ray = this.createPickingRayInCameraSpace(x, y, camera);
+    }
+
+    return result;
 };
 
 Scene.prototype.pickSpriteWithRay = function(ray: Ray, predicate?: (sprite: Sprite) => boolean, fastCheck?: boolean, camera?: Camera): Nullable<PickingInfo> {
@@ -190,7 +200,12 @@ Scene.prototype.pickSpriteWithRay = function(ray: Ray, predicate?: (sprite: Spri
 
     Ray.TransformToRef(ray, camera.getViewMatrix(), this._tempSpritePickingRay);
 
-    return this._internalPickSprites(this._tempSpritePickingRay, predicate, fastCheck, camera);
+    const result = this._internalPickSprites(this._tempSpritePickingRay, predicate, fastCheck, camera);
+    if (result) {
+        result.ray = ray;
+    }
+
+    return result;
 };
 
 Scene.prototype.multiPickSprite = function(x: number, y: number, predicate?: (sprite: Sprite) => boolean, camera?: Camera): Nullable<PickingInfo[]> {
@@ -289,7 +304,7 @@ export class SpriteSceneComponent implements ISceneComponent {
     }
 
     /**
-     * Disposes the component and the associated ressources.
+     * Disposes the component and the associated resources.
      */
     public dispose(): void {
         this.scene.onBeforeSpritesRenderingObservable.clear();
@@ -309,7 +324,7 @@ export class SpriteSceneComponent implements ISceneComponent {
         return result;
     }
 
-    private _pointerMove(unTranslatedPointerX: number, unTranslatedPointerY: number, pickResult: Nullable<PickingInfo>, isMeshPicked: boolean, element: HTMLElement): Nullable<PickingInfo> {
+    private _pointerMove(unTranslatedPointerX: number, unTranslatedPointerY: number, pickResult: Nullable<PickingInfo>, isMeshPicked: boolean, element: Nullable<HTMLElement>): Nullable<PickingInfo> {
         var scene = this.scene;
         if (isMeshPicked) {
             scene.setPointerOverSprite(null);
@@ -318,7 +333,7 @@ export class SpriteSceneComponent implements ISceneComponent {
 
             if (pickResult && pickResult.hit && pickResult.pickedSprite) {
                 scene.setPointerOverSprite(pickResult.pickedSprite);
-                if (!scene.doNotHandleCursors) {
+                if (!scene.doNotHandleCursors && element) {
                     if (scene._pointerOverSprite && scene._pointerOverSprite.actionManager && scene._pointerOverSprite.actionManager.hoverCursor) {
                         element.style.cursor = scene._pointerOverSprite.actionManager.hoverCursor;
                     } else {
@@ -333,7 +348,7 @@ export class SpriteSceneComponent implements ISceneComponent {
         return pickResult;
     }
 
-    private _pointerDown(unTranslatedPointerX: number, unTranslatedPointerY: number, pickResult: Nullable<PickingInfo>, evt: PointerEvent): Nullable<PickingInfo> {
+    private _pointerDown(unTranslatedPointerX: number, unTranslatedPointerY: number, pickResult: Nullable<PickingInfo>, evt: IPointerEvent): Nullable<PickingInfo> {
         var scene = this.scene;
         scene._pickedDownSprite = null;
         if (scene.spriteManagers.length > 0) {
@@ -363,7 +378,7 @@ export class SpriteSceneComponent implements ISceneComponent {
         return pickResult;
     }
 
-    private _pointerUp(unTranslatedPointerX: number, unTranslatedPointerY: number, pickResult: Nullable<PickingInfo>, evt: PointerEvent): Nullable<PickingInfo> {
+    private _pointerUp(unTranslatedPointerX: number, unTranslatedPointerY: number, pickResult: Nullable<PickingInfo>, evt: IPointerEvent): Nullable<PickingInfo> {
         var scene = this.scene;
         if (scene.spriteManagers.length > 0) {
             let spritePickResult = scene.pickSprite(unTranslatedPointerX, unTranslatedPointerY, this._spritePredicate, false, scene.cameraToUseForPointers || undefined);

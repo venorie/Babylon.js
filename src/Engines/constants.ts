@@ -1,4 +1,4 @@
-/** Defines the cross module used constants to avoid circular dependncies */
+/** Defines the cross module used constants to avoid circular dependencies */
 export class Constants {
     /** Defines that alpha blending is disabled */
     public static readonly ALPHA_DISABLE = 0;
@@ -74,16 +74,16 @@ export class Constants {
      */
     public static readonly ALPHA_EQUATION_DARKEN = 5;
 
-    /** Defines that the ressource is not delayed*/
+    /** Defines that the resource is not delayed*/
     public static readonly DELAYLOADSTATE_NONE = 0;
-    /** Defines that the ressource was successfully delay loaded */
+    /** Defines that the resource was successfully delay loaded */
     public static readonly DELAYLOADSTATE_LOADED = 1;
-    /** Defines that the ressource is currently delay loading */
+    /** Defines that the resource is currently delay loading */
     public static readonly DELAYLOADSTATE_LOADING = 2;
-    /** Defines that the ressource is delayed and has not started loading */
+    /** Defines that the resource is delayed and has not started loading */
     public static readonly DELAYLOADSTATE_NOTLOADED = 4;
 
-    // Depht or Stencil test Constants.
+    // Depth or Stencil test Constants.
     /** Passed to depthFunction or stencilFunction to specify depth or stencil tests will never pass. i.e. Nothing will be drawn */
     public static readonly NEVER = 0x0200;
     /** Passed to depthFunction or stencilFunction to specify depth or stencil tests will always pass. i.e. Pixels will be drawn in the order they are drawn */
@@ -104,6 +104,8 @@ export class Constants {
     // Stencil Actions Constants.
     /** Passed to stencilOperation to specify that stencil value must be kept */
     public static readonly KEEP = 0x1E00;
+    /** Passed to stencilOperation to specify that stencil value must be zero */
+    public static readonly ZERO = 0x0000;
     /** Passed to stencilOperation to specify that stencil value must be replaced */
     public static readonly REPLACE = 0x1E01;
     /** Passed to stencilOperation to specify that stencil value must be incremented */
@@ -123,6 +125,9 @@ export class Constants {
     public static readonly TEXTURE_WRAP_ADDRESSMODE = 1;
     /** Texture is repeating and mirrored */
     public static readonly TEXTURE_MIRROR_ADDRESSMODE = 2;
+
+    /** Flag to create a storage texture */
+    public static readonly TEXTURE_CREATIONFLAG_STORAGE = 1;
 
     /** ALPHA */
     public static readonly TEXTUREFORMAT_ALPHA = 0;
@@ -150,6 +155,30 @@ export class Constants {
     public static readonly TEXTUREFORMAT_RGB_INTEGER = 10;
     /** RGBA_INTEGER */
     public static readonly TEXTUREFORMAT_RGBA_INTEGER = 11;
+    /** BGRA */
+    public static readonly TEXTUREFORMAT_BGRA = 12;
+
+    /** Depth 24 bits + Stencil 8 bits */
+    public static readonly TEXTUREFORMAT_DEPTH24_STENCIL8 = 13;
+    /** Depth 32 bits float */
+    public static readonly TEXTUREFORMAT_DEPTH32_FLOAT = 14;
+
+    /** Compressed BC7 */
+    public static readonly TEXTUREFORMAT_COMPRESSED_RGBA_BPTC_UNORM = 36492;
+    /** Compressed BC6 unsigned float */
+    public static readonly TEXTUREFORMAT_COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT = 36495;
+    /** Compressed BC6 signed float */
+    public static readonly TEXTUREFORMAT_COMPRESSED_RGB_BPTC_SIGNED_FLOAT = 36494;
+    /** Compressed BC3 */
+    public static readonly TEXTUREFORMAT_COMPRESSED_RGBA_S3TC_DXT5 = 33779;
+    /** Compressed BC2 */
+    public static readonly TEXTUREFORMAT_COMPRESSED_RGBA_S3TC_DXT3 = 33778;
+    /** Compressed BC1 (RGBA) */
+    public static readonly TEXTUREFORMAT_COMPRESSED_RGBA_S3TC_DXT1 = 33777;
+    /** Compressed BC1 (RGB) */
+    public static readonly TEXTUREFORMAT_COMPRESSED_RGB_S3TC_DXT1 = 33776;
+    /** Compressed ASTC 4x4 */
+    public static readonly TEXTUREFORMAT_COMPRESSED_RGBA_ASTC_4x4 = 37808;
 
     /** UNSIGNED_BYTE */
     public static readonly TEXTURETYPE_UNSIGNED_BYTE = 0;
@@ -282,9 +311,13 @@ export class Constants {
      */
     public static readonly MATERIAL_MiscDirtyFlag = 16;
     /**
+     * The dirty prepass flag value
+     */
+    public static readonly MATERIAL_PrePassDirtyFlag = 32;
+    /**
      * The all dirty flag value
      */
-    public static readonly MATERIAL_AllDirtyFlag = 31;
+    public static readonly MATERIAL_AllDirtyFlag = 63;
 
     /**
      * Returns the triangle fill mode
@@ -481,27 +514,173 @@ export class Constants {
      */
     public static readonly SCENELOADER_SUMMARY_LOGGING = 2;
     /**
-     * Detailled logging while loading
+     * Detailed logging while loading
      */
     public static readonly SCENELOADER_DETAILED_LOGGING = 3;
 
     /**
-     * Prepass texture index for color
+     * Constant used to retrieve the irradiance texture index in the textures array in the prepass
+     * using getIndex(Constants.PREPASS_IRRADIANCE_TEXTURE_TYPE)
      */
-    public static readonly PREPASS_COLOR_INDEX = 0;
+    public static readonly PREPASS_IRRADIANCE_TEXTURE_TYPE = 0;
+    /**
+     * Constant used to retrieve the position texture index in the textures array in the prepass
+     * using getIndex(Constants.PREPASS_POSITION_TEXTURE_INDEX)
+     */
+    public static readonly PREPASS_POSITION_TEXTURE_TYPE = 1;
+    /**
+     * Constant used to retrieve the velocity texture index in the textures array in the prepass
+     * using getIndex(Constants.PREPASS_VELOCITY_TEXTURE_INDEX)
+     */
+    public static readonly PREPASS_VELOCITY_TEXTURE_TYPE = 2;
+    /**
+     * Constant used to retrieve the reflectivity texture index in the textures array in the prepass
+     * using the getIndex(Constants.PREPASS_REFLECTIVITY_TEXTURE_TYPE)
+     */
+    public static readonly PREPASS_REFLECTIVITY_TEXTURE_TYPE = 3;
+    /**
+     * Constant used to retrieve the lit color texture index in the textures array in the prepass
+     * using the getIndex(Constants.PREPASS_COLOR_TEXTURE_TYPE)
+     */
+    public static readonly PREPASS_COLOR_TEXTURE_TYPE = 4;
+    /**
+     * Constant used to retrieve depth index in the textures array in the prepass
+     * using the getIndex(Constants.PREPASS_DEPTH_TEXTURE_TYPE)
+     */
+    public static readonly PREPASS_DEPTH_TEXTURE_TYPE = 5;
+    /**
+     * Constant used to retrieve normal index in the textures array in the prepass
+     * using the getIndex(Constants.PREPASS_NORMAL_TEXTURE_TYPE)
+     */
+    public static readonly PREPASS_NORMAL_TEXTURE_TYPE = 6;
+    /**
+     * Constant used to retrieve albedo index in the textures array in the prepass
+     * using the getIndex(Constants.PREPASS_ALBEDO_TEXTURE_TYPE)
+     */
+    public static readonly PREPASS_ALBEDO_TEXTURE_TYPE = 7;
+
+    /** Flag to create a readable buffer (the buffer can be the source of a copy) */
+    public static readonly BUFFER_CREATIONFLAG_READ = 1;
+    /** Flag to create a writable buffer (the buffer can be the destination of a copy) */
+    public static readonly BUFFER_CREATIONFLAG_WRITE = 2;
+    /** Flag to create a readable and writable buffer */
+    public static readonly BUFFER_CREATIONFLAG_READWRITE = 3;
+    /** Flag to create a buffer suitable to be used as a uniform buffer */
+    public static readonly BUFFER_CREATIONFLAG_UNIFORM = 4;
+    /** Flag to create a buffer suitable to be used as a vertex buffer */
+    public static readonly BUFFER_CREATIONFLAG_VERTEX = 8;
+    /** Flag to create a buffer suitable to be used as an index buffer */
+    public static readonly BUFFER_CREATIONFLAG_INDEX = 16;
+    /** Flag to create a buffer suitable to be used as a storage buffer */
+    public static readonly BUFFER_CREATIONFLAG_STORAGE = 32;
 
     /**
-     * Prepass texture index for irradiance
+     * Prefixes used by the engine for sub mesh draw wrappers
      */
-    public static readonly PREPASS_IRRADIANCE_INDEX = 1;
+
+    /** @hidden */
+    public static readonly SUBMESH_DRAWWRAPPER_MAINPASS = "bjs_mainpass";
+    /** @hidden */
+    public static readonly SUBMESH_DRAWWRAPPER_SHADOWGENERATOR_PREFIX = "bjs_shadowgenerator_";
+    /** @hidden */
+    public static readonly SUBMESH_DRAWWRAPPER_DEPTHRENDERER_PREFIX = "bjs_depthrenderer_";
+    /** @hidden */
+    public static readonly SUBMESH_DRAWWRAPPER_OUTLINERENDERER_PREFIX = "bjs_outlinerenderer_";
 
     /**
-     * Prepass texture index for depth + normal
+     * Constant used as key code for Alt key
      */
-    public static readonly PREPASS_DEPTHNORMAL_INDEX = 2;
+    public static readonly INPUT_ALT_KEY = 18;
 
     /**
-     * Prepass texture index for albedo
+     * Constant used as key code for Ctrl key
      */
-    public static readonly PREPASS_ALBEDO_INDEX = 3;
+    public static readonly INPUT_CTRL_KEY = 17;
+
+    /**
+     * Constant used as key code for Meta key (Left Win, Left Cmd)
+     */
+    public static readonly INPUT_META_KEY1 = 91;
+
+    /**
+     * Constant used as key code for Meta key (Right Win)
+     */
+    public static readonly INPUT_META_KEY2 = 92;
+
+    /**
+     * Constant used as key code for Meta key (Right Win, Right Cmd)
+     */
+    public static readonly INPUT_META_KEY3 = 93;
+
+    /**
+     * Constant used as key code for Shift key
+     */
+    public static readonly INPUT_SHIFT_KEY = 16;
+
+    /** Standard snapshot rendering. In this mode, some form of dynamic behavior is possible (for eg, uniform buffers are still updated) */
+    public static readonly SNAPSHOTRENDERING_STANDARD = 0;
+
+    /** Fast snapshot rendering. In this mode, everything is static and only some limited form of dynamic behaviour is possible */
+    public static readonly SNAPSHOTRENDERING_FAST = 1;
+
+    /**
+     * This is the default projection mode used by the cameras.
+     * It helps recreating a feeling of perspective and better appreciate depth.
+     * This is the best way to simulate real life cameras.
+     */
+     public static readonly PERSPECTIVE_CAMERA = 0;
+     /**
+      * This helps creating camera with an orthographic mode.
+      * Orthographic is commonly used in engineering as a means to produce object specifications that communicate dimensions unambiguously, each line of 1 unit length (cm, meter..whatever) will appear to have the same length everywhere on the drawing. This allows the drafter to dimension only a subset of lines and let the reader know that other lines of that length on the drawing are also that length in reality. Every parallel line in the drawing is also parallel in the object.
+      */
+     public static readonly ORTHOGRAPHIC_CAMERA = 1;
+
+     /**
+      * This is the default FOV mode for perspective cameras.
+      * This setting aligns the upper and lower bounds of the viewport to the upper and lower bounds of the camera frustum.
+      */
+     public static readonly FOVMODE_VERTICAL_FIXED = 0;
+     /**
+      * This setting aligns the left and right bounds of the viewport to the left and right bounds of the camera frustum.
+      */
+     public static readonly FOVMODE_HORIZONTAL_FIXED = 1;
+
+     /**
+      * This specifies there is no need for a camera rig.
+      * Basically only one eye is rendered corresponding to the camera.
+      */
+     public static readonly RIG_MODE_NONE = 0;
+     /**
+      * Simulates a camera Rig with one blue eye and one red eye.
+      * This can be use with 3d blue and red glasses.
+      */
+     public static readonly RIG_MODE_STEREOSCOPIC_ANAGLYPH = 10;
+     /**
+      * Defines that both eyes of the camera will be rendered side by side with a parallel target.
+      */
+     public static readonly RIG_MODE_STEREOSCOPIC_SIDEBYSIDE_PARALLEL = 11;
+     /**
+      * Defines that both eyes of the camera will be rendered side by side with a none parallel target.
+      */
+     public static readonly RIG_MODE_STEREOSCOPIC_SIDEBYSIDE_CROSSEYED = 12;
+     /**
+      * Defines that both eyes of the camera will be rendered over under each other.
+      */
+     public static readonly RIG_MODE_STEREOSCOPIC_OVERUNDER = 13;
+     /**
+      * Defines that both eyes of the camera will be rendered on successive lines interlaced for passive 3d monitors.
+      */
+     public static readonly RIG_MODE_STEREOSCOPIC_INTERLACED = 14;
+     /**
+      * Defines that both eyes of the camera should be renderered in a VR mode (carbox).
+      */
+     public static readonly RIG_MODE_VR = 20;
+     /**
+      * Defines that both eyes of the camera should be renderered in a VR mode (webVR).
+      */
+     public static readonly RIG_MODE_WEBVR = 21;
+     /**
+      * Custom rig mode allowing rig cameras to be populated manually with any number of cameras
+      */
+     public static readonly RIG_MODE_CUSTOM = 22;
 }

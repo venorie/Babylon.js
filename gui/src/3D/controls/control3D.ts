@@ -20,7 +20,7 @@ export class Control3D implements IDisposable, IBehaviorAware<Control3D> {
     private _node: Nullable<TransformNode>;
     private _downCount = 0;
     private _enterCount = -1;
-    private _downPointerIds: { [id: number]: boolean } = {};
+    private _downPointerIds: { [id: number]: number } = {}; // Store number of pointer downs per ID, from near and far interactions
     private _isVisible = true;
 
     /** Gets or sets the control position  in world space */
@@ -67,8 +67,8 @@ export class Control3D implements IDisposable, IBehaviorAware<Control3D> {
     public pointerUpAnimation: () => void;
 
     /**
-    * An event triggered when the pointer move over the control
-    */
+     * An event triggered when the pointer move over the control
+     */
     public onPointerMoveObservable = new Observable<Vector3>();
 
     /**
@@ -199,8 +199,8 @@ export class Control3D implements IDisposable, IBehaviorAware<Control3D> {
      */
     constructor(
         /** Defines the control name */
-        public name?: string) {
-    }
+        public name?: string
+    ) {}
 
     /**
      * Gets a string representing the class name
@@ -259,9 +259,7 @@ export class Control3D implements IDisposable, IBehaviorAware<Control3D> {
             if (!this.node) {
                 return;
             }
-            this._node!.metadata = this; // Store the control on the metadata field in order to get it when picking
-            this._node!.position = this.position;
-            this._node!.scaling = this.scaling;
+            this._injectGUI3DReservedDataStore(this.node).control = this; // Store the control on the reservedDataStore field in order to get it when picking
 
             let mesh = this.mesh;
             if (mesh) {
@@ -270,6 +268,12 @@ export class Control3D implements IDisposable, IBehaviorAware<Control3D> {
                 this._affectMaterial(mesh);
             }
         }
+    }
+
+    protected _injectGUI3DReservedDataStore(node: TransformNode): any {
+        node.reservedDataStore = node.reservedDataStore ?? {};
+        node.reservedDataStore.GUI3D = node.reservedDataStore.GUI3D ?? {};
+        return node.reservedDataStore.GUI3D;
     }
 
     /**
@@ -300,15 +304,16 @@ export class Control3D implements IDisposable, IBehaviorAware<Control3D> {
 
     /** @hidden */
     public _onPointerEnter(target: Control3D): boolean {
-        if (this._enterCount > 0) {
-            return false;
-        }
-
-        if (this._enterCount === -1) { // -1 is for touch input, we are now sure we are with a mouse or pencil
+        if (this._enterCount === -1) {
+            // -1 is for touch input, we are now sure we are with a mouse or pencil
             this._enterCount = 0;
         }
 
         this._enterCount++;
+
+        if (this._enterCount > 1) {
+            return false;
+        }
 
         this.onPointerEnterObservable.notifyObservers(this, -1, target, this);
 
@@ -321,6 +326,12 @@ export class Control3D implements IDisposable, IBehaviorAware<Control3D> {
 
     /** @hidden */
     public _onPointerOut(target: Control3D): void {
+        this._enterCount--;
+
+        if (this._enterCount > 0) {
+            return;
+        }
+
         this._enterCount = 0;
 
         this.onPointerOutObservable.notifyObservers(this, -1, target, this);
@@ -332,14 +343,12 @@ export class Control3D implements IDisposable, IBehaviorAware<Control3D> {
 
     /** @hidden */
     public _onPointerDown(target: Control3D, coordinates: Vector3, pointerId: number, buttonIndex: number): boolean {
-        if (this._downCount !== 0) {
-            this._downCount++;
+        this._downCount++;
+        this._downPointerIds[pointerId] = this._downPointerIds[pointerId] + 1 || 1;
+
+        if (this._downCount !== 1) {
             return false;
         }
-
-        this._downCount++;
-
-        this._downPointerIds[pointerId] = true;
 
         this.onPointerDownObservable.notifyObservers(new Vector3WithInfo(coordinates, buttonIndex), -1, target, this);
 
@@ -353,7 +362,11 @@ export class Control3D implements IDisposable, IBehaviorAware<Control3D> {
     /** @hidden */
     public _onPointerUp(target: Control3D, coordinates: Vector3, pointerId: number, buttonIndex: number, notifyClick: boolean): void {
         this._downCount--;
-        delete this._downPointerIds[pointerId];
+        this._downPointerIds[pointerId]--;
+
+        if (this._downPointerIds[pointerId] <= 0) {
+            delete this._downPointerIds[pointerId];
+        }
 
         if (this._downCount < 0) {
             // Handle if forcePointerUp was called prior to this
@@ -385,7 +398,6 @@ export class Control3D implements IDisposable, IBehaviorAware<Control3D> {
                 this._downCount = 1;
                 this._onPointerUp(this, Vector3.Zero(), 0, 0, true);
             }
-
         }
     }
 

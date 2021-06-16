@@ -6,6 +6,7 @@ import { ArrayTools } from '../Misc/arrayTools';
 import { IPlaneLike } from './math.like';
 import { _TypeStore } from '../Misc/typeStore';
 import { Plane } from './math.plane';
+import { PerformanceConfigurator } from '../Engines/performanceConfigurator';
 
 /**
  * Class representing a vector containing 2 coordinates
@@ -28,7 +29,7 @@ export class Vector2 {
      * @returns a string with the Vector2 coordinates
      */
     public toString(): string {
-        return "{X: " + this.x + " Y:" + this.y + "}";
+        return `{X: ${this.x} Y: ${this.y}}`;
     }
 
     /**
@@ -60,6 +61,17 @@ export class Vector2 {
     public toArray(array: FloatArray, index: number = 0): Vector2 {
         array[index] = this.x;
         array[index + 1] = this.y;
+        return this;
+    }
+
+    /**
+     * Update the current vector from an array
+     * @param array defines the destination array
+     * @param index defines the offset in the destination array
+     * @returns the current Vector3
+     */
+    public fromArray(array: FloatArray, index: number = 0): Vector2 {
+        Vector2.FromArrayToRef(array, index, this);
         return this;
     }
 
@@ -343,6 +355,7 @@ export class Vector2 {
 
     /**
      * Gets a new Vector2 from current Vector2 floored values
+     * eg (1.2, 2.31) returns (1, 2)
      * @returns a new Vector2
      */
     public floor(): Vector2 {
@@ -350,11 +363,27 @@ export class Vector2 {
     }
 
     /**
-     * Gets a new Vector2 from current Vector2 floored values
+     * Gets a new Vector2 from current Vector2 fractional values
+     * eg (1.2, 2.31) returns (0.2, 0.31)
      * @returns a new Vector2
      */
     public fract(): Vector2 {
         return new Vector2(this.x - Math.floor(this.x), this.y - Math.floor(this.y));
+    }
+
+    /**
+     * Rotate the current vector into a given result vector
+     * @param angle defines the rotation angle
+     * @param result defines the result vector where to store the rotated vector
+     * @returns the current vector
+     */
+    public rotateToRef(angle: number, result: Vector2) {
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        result.x = cos * this.x - sin * this.y;
+        result.y = sin * this.x + cos * this.y;
+
+        return this;
     }
 
     // Properties
@@ -382,15 +411,7 @@ export class Vector2 {
      * @returns the current updated Vector2
      */
     public normalize(): Vector2 {
-        var len = this.length();
-
-        if (len === 0) {
-            return this;
-        }
-
-        this.x /= len;
-        this.y /= len;
-
+        Vector2.NormalizeToRef(this, this);
         return this;
     }
 
@@ -487,7 +508,7 @@ export class Vector2 {
     }
 
     /**
-     * Returns a new Vector2 located for "amount" (float) on the Hermite spline defined by the vectors "value1", "value3", "tangent1", "tangent2"
+     * Returns a new Vector2 located for "amount" (float) on the Hermite spline defined by the vectors "value1", "value2", "tangent1", "tangent2"
      * @param value1 defines the 1st control point
      * @param tangent1 defines the outgoing tangent
      * @param value2 defines the 2nd control point
@@ -507,6 +528,39 @@ export class Vector2 {
         var y = (((value1.y * part1) + (value2.y * part2)) + (tangent1.y * part3)) + (tangent2.y * part4);
 
         return new Vector2(x, y);
+    }
+
+    /**
+     * Returns a new Vector2 which is the 1st derivative of the Hermite spline defined by the vectors "value1", "value2", "tangent1", "tangent2".
+     * @param value1 defines the first control point
+     * @param tangent1 defines the first tangent
+     * @param value2 defines the second control point
+     * @param tangent2 defines the second tangent
+     * @param time define where the derivative must be done
+     * @returns 1st derivative
+     */
+     public static Hermite1stDerivative(value1: DeepImmutable<Vector2>, tangent1: DeepImmutable<Vector2>, value2: DeepImmutable<Vector2>, tangent2: DeepImmutable<Vector2>, time: number): Vector2 {
+        let result = Vector2.Zero();
+
+        this.Hermite1stDerivativeToRef(value1, tangent1, value2, tangent2, time, result);
+
+        return result;
+    }
+
+    /**
+     * Returns a new Vector2 which is the 1st derivative of the Hermite spline defined by the vectors "value1", "value2", "tangent1", "tangent2".
+     * @param value1 defines the first control point
+     * @param tangent1 defines the first tangent
+     * @param value2 defines the second control point
+     * @param tangent2 defines the second tangent
+     * @param time define where the derivative must be done
+     * @param result define where the derivative will be stored
+     */
+    public static Hermite1stDerivativeToRef(value1: DeepImmutable<Vector2>, tangent1: DeepImmutable<Vector2>, value2: DeepImmutable<Vector2>, tangent2: DeepImmutable<Vector2>, time: number, result: Vector2) {
+        const t2 = time * time;
+
+        result.x = (t2 - time) * 6 * value1.x + (3 * t2 - 4 * time + 1) * tangent1.x + (-t2 + time) * 6 * value2.x + (3 * t2 - 2 * time) * tangent2.x;
+        result.y = (t2 - time) * 6 * value1.y + (3 * t2 - 4 * time + 1) * tangent1.y + (-t2 + time) * 6 * value2.y + (3 * t2 - 2 * time) * tangent2.y;
     }
 
     /**
@@ -538,9 +592,25 @@ export class Vector2 {
      * @returns a new Vector2
      */
     public static Normalize(vector: DeepImmutable<Vector2>): Vector2 {
-        var newVector = vector.clone();
-        newVector.normalize();
+        var newVector = Vector2.Zero();
+        this.NormalizeToRef(vector, newVector);
         return newVector;
+    }
+
+    /**
+     * Normalize a given vector into a second one
+     * @param vector defines the vector to normalize
+     * @param result defines the vector where to store the result
+     */
+     public static NormalizeToRef(vector: DeepImmutable<Vector2>, result: Vector2) {
+        var len = vector.length();
+
+        if (len === 0) {
+            return;
+        }
+
+        result.x = vector.x / len;
+        result.y = vector.y / len;
     }
 
     /**
@@ -639,9 +709,18 @@ export class Vector2 {
      * @returns a new Vector2
      */
     public static Center(value1: DeepImmutable<Vector2>, value2: DeepImmutable<Vector2>): Vector2 {
-        var center = value1.add(value2);
-        center.scaleInPlace(0.5);
-        return center;
+        return Vector2.CenterToRef(value1, value2, Vector2.Zero());
+    }
+
+    /**
+     * Gets the center of the vectors "value1" and "value2" and stores the result in the vector "ref"
+     * @param value1 defines first vector
+     * @param value2 defines second vector
+     * @param ref defines third vector
+     * @returns ref
+     */
+    public static CenterToRef(value1: DeepImmutable<Vector2>, value2: DeepImmutable<Vector2>, ref: DeepImmutable<Vector2>): Vector2 {
+        return ref.copyFromFloats((value1.x + value2.x) / 2, (value1.y + value2.y) / 2);
     }
 
     /**
@@ -736,7 +815,7 @@ export class Vector3 {
      * @returns a string with the Vector3 coordinates.
      */
     public toString(): string {
-        return "{X: " + this._x + " Y:" + this._y + " Z:" + this._z + "}";
+        return `{X: ${this._x} Y: ${this._y} Z: ${this._z}}`;
     }
 
     /**
@@ -780,6 +859,17 @@ export class Vector3 {
         array[index] = this._x;
         array[index + 1] = this._y;
         array[index + 2] = this._z;
+        return this;
+    }
+
+    /**
+     * Update the current vector from an array
+     * @param array defines the destination array
+     * @param index defines the offset in the destination array
+     * @returns the current Vector3
+     */
+    public fromArray(array: FloatArray, index: number = 0): Vector3 {
+        Vector3.FromArrayToRef(array, index, this);
         return this;
     }
 
@@ -980,7 +1070,7 @@ export class Vector3 {
         let n = plane.normal;
         let d = plane.d;
 
-        let V  = MathTmp.Vector3[0];
+        let V = MathTmp.Vector3[0];
 
         // ray direction
         this.subtractToRef(origin, V);
@@ -1399,12 +1489,98 @@ export class Vector3 {
         const v0: Vector3 = vector0.normalizeToRef(MathTmp.Vector3[1]);
         const v1: Vector3 = vector1.normalizeToRef(MathTmp.Vector3[2]);
         const dot: number = Vector3.Dot(v0, v1);
+        const angle = Math.acos(dot);
         const n = MathTmp.Vector3[3];
         Vector3.CrossToRef(v0, v1, n);
         if (Vector3.Dot(n, normal) > 0) {
-            return Math.acos(dot);
+            return isNaN(angle) ? 0 : angle;
         }
-        return -Math.acos(dot);
+        return isNaN(angle) ? -Math.PI : -Math.acos(dot);
+    }
+
+    /**
+     * Get angle between two vectors projected on a plane
+     * @param vector0 angle between vector0 and vector1
+     * @param vector1 angle between vector0 and vector1
+     * @param normal Normal of the projection plane
+     * @returns the angle between vector0 and vector1 projected on the plane with the specified normal
+     */
+    public static GetAngleBetweenVectorsOnPlane(vector0: Vector3, vector1: Vector3, normal: Vector3) {
+        MathTmp.Vector3[0].copyFrom(vector0);
+        const v0 = MathTmp.Vector3[0];
+        MathTmp.Vector3[1].copyFrom(vector1);
+        const v1 = MathTmp.Vector3[1];
+        MathTmp.Vector3[2].copyFrom(normal);
+        const vNormal = MathTmp.Vector3[2];
+        const right = MathTmp.Vector3[3];
+        const forward = MathTmp.Vector3[4];
+
+        v0.normalize();
+        v1.normalize();
+        vNormal.normalize();
+
+        Vector3.CrossToRef(vNormal, v0, right);
+        Vector3.CrossToRef(right, vNormal, forward);
+
+        const angle = Math.atan2(Vector3.Dot(v1, right), Vector3.Dot(v1, forward));
+
+        return Scalar.NormalizeRadians(angle);
+    }
+
+    /**
+     * Slerp between two vectors. See also `SmoothToRef`
+     * @param vector0 Start vector
+     * @param vector1 End vector
+     * @param slerp amount (will be clamped between 0 and 1)
+     * @param result The slerped vector
+     */
+    public static SlerpToRef(vector0: Vector3, vector1: Vector3, slerp: number, result: Vector3) {
+        slerp = Scalar.Clamp(slerp, 0, 1);
+        const vector0Dir = MathTmp.Vector3[0];
+        const vector1Dir = MathTmp.Vector3[1];
+        let vector0Length;
+        let vector1Length;
+
+        vector0Dir.copyFrom(vector0);
+        vector0Length = vector0Dir.length();
+        vector0Dir.normalizeFromLength(vector0Length);
+
+        vector1Dir.copyFrom(vector1);
+        vector1Length = vector1Dir.length();
+        vector1Dir.normalizeFromLength(vector1Length);
+
+        const dot = Vector3.Dot(vector0Dir, vector1Dir);
+
+        let scale0;
+        let scale1;
+
+        if (dot < 1 - Epsilon) {
+            const omega = Math.acos(dot);
+            const invSin = 1 / Math.sin(omega);
+            scale0 = Math.sin((1 - slerp) * omega) * invSin;
+            scale1 = Math.sin(slerp * omega) * invSin;
+        } else {
+            // Use linear interpolation
+            scale0 = 1 - slerp;
+            scale1 = slerp;
+        }
+
+        vector0Dir.scaleInPlace(scale0);
+        vector1Dir.scaleInPlace(scale1);
+        result.copyFrom(vector0Dir).addInPlace(vector1Dir);
+        result.scaleInPlace(Scalar.Lerp(vector0Length, vector1Length, slerp));
+    }
+
+    /**
+     * Smooth interpolation between two vectors using Slerp
+     * @param source source vector
+     * @param goal goal vector
+     * @param deltaTime current interpolation frame
+     * @param lerpTime total interpolation time
+     * @param result the smoothed vector
+     */
+    public static SmoothToRef(source: Vector3, goal: Vector3, deltaTime: number, lerpTime: number, result: Vector3) {
+        Vector3.SlerpToRef(source, goal, lerpTime === 0 ? 1 : deltaTime / lerpTime, result);
     }
 
     /**
@@ -1723,6 +1899,40 @@ export class Vector3 {
     }
 
     /**
+     * Returns a new Vector3 which is the 1st derivative of the Hermite spline defined by the vectors "value1", "value2", "tangent1", "tangent2".
+     * @param value1 defines the first control point
+     * @param tangent1 defines the first tangent
+     * @param value2 defines the second control point
+     * @param tangent2 defines the second tangent
+     * @param time define where the derivative must be done
+     * @returns 1st derivative
+     */
+    public static Hermite1stDerivative(value1: DeepImmutable<Vector3>, tangent1: DeepImmutable<Vector3>, value2: DeepImmutable<Vector3>, tangent2: DeepImmutable<Vector3>, time: number): Vector3 {
+        let result = Vector3.Zero();
+
+        this.Hermite1stDerivativeToRef(value1, tangent1, value2, tangent2, time, result);
+
+        return result;
+    }
+
+    /**
+     * Update a Vector3 with the 1st derivative of the Hermite spline defined by the vectors "value1", "value2", "tangent1", "tangent2".
+     * @param value1 defines the first control point
+     * @param tangent1 defines the first tangent
+     * @param value2 defines the second control point
+     * @param tangent2 defines the second tangent
+     * @param time define where the derivative must be done
+     * @param result define where to store the derivative
+     */
+     public static Hermite1stDerivativeToRef(value1: DeepImmutable<Vector3>, tangent1: DeepImmutable<Vector3>, value2: DeepImmutable<Vector3>, tangent2: DeepImmutable<Vector3>, time: number, result: Vector3) {
+        const t2 = time * time;
+
+        result.x = (t2 - time) * 6 * value1.x + (3 * t2 - 4 * time + 1) * tangent1.x + (-t2 + time) * 6 * value2.x + (3 * t2 - 2 * time) * tangent2.x;
+        result.y = (t2 - time) * 6 * value1.y + (3 * t2 - 4 * time + 1) * tangent1.y + (-t2 + time) * 6 * value2.y + (3 * t2 - 2 * time) * tangent2.y;
+        result.z = (t2 - time) * 6 * value1.z + (3 * t2 - 4 * time + 1) * tangent1.z + (-t2 + time) * 6 * value2.z + (3 * t2 - 2 * time) * tangent2.z;
+    }
+
+    /**
      * Returns a new Vector3 located for "amount" (float) on the linear interpolation between the vectors "start" and "end"
      * @param start defines the start value
      * @param end defines the end value
@@ -1814,6 +2024,21 @@ export class Vector3 {
      * @returns the new Vector3
      */
     public static Project(vector: DeepImmutable<Vector3>, world: DeepImmutable<Matrix>, transform: DeepImmutable<Matrix>, viewport: DeepImmutable<Viewport>): Vector3 {
+        const result = new Vector3();
+        Vector3.ProjectToRef(vector, world, transform, viewport, result);
+        return result;
+    }
+
+    /**
+     * Project a Vector3 onto screen space to reference
+     * @param vector defines the Vector3 to project
+     * @param world defines the world matrix to use
+     * @param transform defines the transform (view x projection) matrix to use
+     * @param viewport defines the screen viewport to use
+     * @param result the vector in which the screen space will be stored
+     * @returns the new Vector3
+     */
+    public static ProjectToRef(vector: DeepImmutable<Vector3>, world: DeepImmutable<Matrix>, transform: DeepImmutable<Matrix>, viewport: DeepImmutable<Viewport>, result: DeepImmutable<Vector3>): Vector3 {
         var cw = viewport.width;
         var ch = viewport.height;
         var cx = viewport.x;
@@ -1831,7 +2056,8 @@ export class Vector3 {
         world.multiplyToRef(transform, matrix);
         matrix.multiplyToRef(viewportMatrix, matrix);
 
-        return Vector3.TransformCoordinates(vector, matrix);
+        Vector3.TransformCoordinatesToRef(vector, matrix, result);
+        return result;
     }
 
     /** @hidden */
@@ -1975,9 +2201,18 @@ export class Vector3 {
      * @returns the new Vector3
      */
     public static Center(value1: DeepImmutable<Vector3>, value2: DeepImmutable<Vector3>): Vector3 {
-        var center = value1.add(value2);
-        center.scaleInPlace(0.5);
-        return center;
+        return Vector3.CenterToRef(value1, value2, Vector3.Zero());
+    }
+
+    /**
+     * Gets the center of the vectors "value1" and "value2" and stores the result in the vector "ref"
+     * @param value1 defines first vector
+     * @param value2 defines second vector
+     * @param ref defines third vector
+     * @returns ref
+     */
+    public static CenterToRef(value1: DeepImmutable<Vector3>, value2: DeepImmutable<Vector3>, ref: DeepImmutable<Vector3>): Vector3 {
+        return ref.copyFromFloats((value1._x + value2._x) / 2, (value1._y + value2._y) / 2, (value1._z + value2._z) / 2);
     }
 
     /**
@@ -2037,7 +2272,7 @@ export class Vector4 {
      * @returns a string containing all the vector values
      */
     public toString(): string {
-        return "{X: " + this.x + " Y:" + this.y + " Z:" + this.z + " W:" + this.w + "}";
+        return `{X: ${this.x} Y: ${this.y} Z: ${this.z} W: ${this.w}}`;
     }
 
     /**
@@ -2087,6 +2322,17 @@ export class Vector4 {
         array[index + 1] = this.y;
         array[index + 2] = this.z;
         array[index + 3] = this.w;
+        return this;
+    }
+
+    /**
+     * Update the current vector from an array
+     * @param array defines the destination array
+     * @param index defines the offset in the destination array
+     * @returns the current Vector3
+     */
+    public fromArray(array: FloatArray, index: number = 0): Vector4 {
+        Vector4.FromArrayToRef(array, index, this);
         return this;
     }
 
@@ -2654,9 +2900,18 @@ export class Vector4 {
      * @return the center between the two vectors
      */
     public static Center(value1: DeepImmutable<Vector4>, value2: DeepImmutable<Vector4>): Vector4 {
-        var center = value1.add(value2);
-        center.scaleInPlace(0.5);
-        return center;
+        return Vector4.CenterToRef(value1, value2, Vector4.Zero());
+    }
+
+    /**
+     * Gets the center of the vectors "value1" and "value2" and stores the result in the vector "ref"
+     * @param value1 defines first vector
+     * @param value2 defines second vector
+     * @param ref defines third vector
+     * @returns ref
+     */
+    public static CenterToRef(value1: DeepImmutable<Vector4>, value2: DeepImmutable<Vector4>, ref: DeepImmutable<Vector4>): Vector4 {
+        return ref.copyFromFloats((value1.x + value2.x) / 2, (value1.y + value2.y) / 2, (value1.z + value2.z) / 2, (value1.w + value2.w) / 2);
     }
 
     /**
@@ -2791,10 +3046,10 @@ export class Quaternion {
         y: number = 0.0,
         z: number = 0.0,
         w: number = 1.0) {
-            this._x = x;
-            this._y = y;
-            this._z = z;
-            this._w = w;
+        this._x = x;
+        this._y = y;
+        this._z = z;
+        this._w = w;
     }
 
     /**
@@ -2802,7 +3057,7 @@ export class Quaternion {
      * @returns a string with the Quaternion coordinates
      */
     public toString(): string {
-        return "{X: " + this._x + " Y:" + this._y + " Z:" + this._z + " W:" + this._w + "}";
+        return `{X: ${this._x} Y: ${this._y} Z: ${this._z} W: ${this._w}}`;
     }
 
     /**
@@ -3079,7 +3334,7 @@ export class Quaternion {
 
     /**
      * Returns a new Vector3 set with the Euler angles translated from the current quaternion
-     * @param order is a reserved parameter and is ignore for now
+     * @param order is a reserved parameter and is ignored for now
      * @returns a new Vector3 containing the Euler angles
      */
     public toEulerAngles(order = "YZX"): Vector3 {
@@ -3091,7 +3346,6 @@ export class Quaternion {
     /**
      * Sets the given vector3 "result" with the Euler angles translated from the current quaternion
      * @param result defines the vector which will be filled with the Euler angles
-     * @param order is a reserved parameter and is ignore for now
      * @returns the current unchanged quaternion
      */
     public toEulerAnglesToRef(result: Vector3): Quaternion {
@@ -3228,6 +3482,22 @@ export class Quaternion {
         let dot = Quaternion.Dot(quat0, quat1);
 
         return dot >= 0;
+    }
+
+    /**
+     * Smooth interpolation between two quaternions using Slerp
+     *
+     * @param source source quaternion
+     * @param goal goal quaternion
+     * @param deltaTime current interpolation frame
+     * @param lerpTime total interpolation time
+     * @param result the smoothed quaternion
+     */
+    public static SmoothToRef(source: Quaternion, goal: Quaternion, deltaTime: number, lerpTime: number, result: Quaternion) {
+        let slerp = lerpTime === 0 ? 1 : deltaTime / lerpTime;
+        slerp = Scalar.Clamp(slerp, 0, 1);
+
+        Quaternion.SlerpToRef(source, goal, slerp, result);
     }
 
     /**
@@ -3377,6 +3647,35 @@ export class Quaternion {
     }
 
     /**
+     * Updates a quaternion so that it rotates vector vecFrom to vector vecTo
+     * @param vecFrom defines the direction vector from which to rotate
+     * @param vecTo defines the direction vector to which to rotate
+     * @param result the quaternion to store the result
+     * @returns the updated quaternion
+     */
+    public static FromUnitVectorsToRef(vecFrom: DeepImmutable<Vector3>, vecTo: DeepImmutable<Vector3>, result: Quaternion): Quaternion {
+        const r = Vector3.Dot(vecFrom, vecTo) + 1;
+
+        if (r < Epsilon) {
+            if (Math.abs(vecFrom.x) > Math.abs(vecFrom.z)) {
+                result.set(-vecFrom.y, vecFrom.x, 0, 0);
+            } else {
+                result.set(0, - vecFrom.z, vecFrom.y, 0);
+            }
+        } else {
+            Vector3.CrossToRef(vecFrom, vecTo, TmpVectors.Vector3[0]);
+            result.set(
+                TmpVectors.Vector3[0].x,
+                TmpVectors.Vector3[0].y,
+                TmpVectors.Vector3[0].z,
+                r
+            );
+        }
+
+        return result.normalize();
+    }
+
+    /**
      * Creates a new quaternion from the given Euler float angles (y, x, z)
      * @param yaw defines the rotation around Y axis
      * @param pitch defines the rotation around X axis
@@ -3474,6 +3773,58 @@ export class Quaternion {
     }
 
     /**
+     * Creates a new rotation value to orient an object to look towards the given forward direction, the up direction being oriented like "up".
+     * This function works in left handed mode
+     * @param forward defines the forward direction - Must be normalized and orthogonal to up.
+     * @param up defines the up vector for the entity - Must be normalized and orthogonal to forward.
+     * @returns A new quaternion oriented toward the specified forward and up.
+     */
+    public static FromLookDirectionLH(forward: DeepImmutable<Vector3>, up: DeepImmutable<Vector3>): Quaternion {
+        var quat = new Quaternion();
+        Quaternion.FromLookDirectionLHToRef(forward, up, quat);
+        return quat;
+    }
+
+    /**
+    * Creates a new rotation value to orient an object to look towards the given forward direction with the up direction being oriented like "up", and stores it in the target quaternion.
+    * This function works in left handed mode
+    * @param forward defines the forward direction - Must be normalized and orthogonal to up.
+    * @param up defines the up vector for the entity - Must be normalized and orthogonal to forward.
+    * @param ref defines the target quaternion.
+    */
+    public static FromLookDirectionLHToRef(forward: DeepImmutable<Vector3>, up: DeepImmutable<Vector3>, ref: Quaternion): void {
+        var rotMat = MathTmp.Matrix[0];
+        Matrix.LookDirectionLHToRef(forward, up, rotMat);
+        Quaternion.FromRotationMatrixToRef(rotMat, ref);
+    }
+
+    /**
+     * Creates a new rotation value to orient an object to look towards the given forward direction, the up direction being oriented like "up".
+     * This function works in right handed mode
+     * @param forward defines the forward direction - Must be normalized and orthogonal to up.
+     * @param up defines the up vector for the entity - Must be normalized and orthogonal to forward.
+     * @returns A new quaternion oriented toward the specified forward and up.
+     */
+    public static FromLookDirectionRH(forward: DeepImmutable<Vector3>, up: DeepImmutable<Vector3>): Quaternion {
+        var quat = new Quaternion();
+        Quaternion.FromLookDirectionRHToRef(forward, up, quat);
+        return quat;
+    }
+
+    /**
+     * Creates a new rotation value to orient an object to look towards the given forward direction with the up direction being oriented like "up", and stores it in the target quaternion.
+     * This function works in right handed mode
+     * @param forward defines the forward direction - Must be normalized and orthogonal to up.
+     * @param up defines the up vector for the entity - Must be normalized and orthogonal to forward.
+     * @param ref defines the target quaternion.
+     */
+    public static FromLookDirectionRHToRef(forward: DeepImmutable<Vector3>, up: DeepImmutable<Vector3>, ref: Quaternion): void {
+        var rotMat = MathTmp.Matrix[0];
+        Matrix.LookDirectionRHToRef(forward, up, rotMat);
+        return Quaternion.FromRotationMatrixToRef(rotMat, ref);
+    }
+
+    /**
      * Interpolates between two quaternions
      * @param left defines first quaternion
      * @param right defines second quaternion
@@ -3546,12 +3897,55 @@ export class Quaternion {
         var w = (((value1._w * part1) + (value2._w * part2)) + (tangent1._w * part3)) + (tangent2._w * part4);
         return new Quaternion(x, y, z, w);
     }
+
+    /**
+     * Returns a new Quaternion which is the 1st derivative of the Hermite spline defined by the quaternions "value1", "value2", "tangent1", "tangent2".
+     * @param value1 defines the first control point
+     * @param tangent1 defines the first tangent
+     * @param value2 defines the second control point
+     * @param tangent2 defines the second tangent
+     * @param time define where the derivative must be done
+     * @returns 1st derivative
+     */
+    public static Hermite1stDerivative(value1: DeepImmutable<Quaternion>, tangent1: DeepImmutable<Quaternion>, value2: DeepImmutable<Quaternion>, tangent2: DeepImmutable<Quaternion>, time: number): Quaternion {
+        let result = Quaternion.Zero();
+
+        this.Hermite1stDerivativeToRef(value1, tangent1, value2, tangent2, time, result);
+
+        return result;
+    }
+
+    /**
+     * Update a Quaternion with the 1st derivative of the Hermite spline defined by the quaternions "value1", "value2", "tangent1", "tangent2".
+     * @param value1 defines the first control point
+     * @param tangent1 defines the first tangent
+     * @param value2 defines the second control point
+     * @param tangent2 defines the second tangent
+     * @param time define where the derivative must be done
+     * @param result define where to store the derivative
+     */
+    public static Hermite1stDerivativeToRef(value1: DeepImmutable<Quaternion>, tangent1: DeepImmutable<Quaternion>, value2: DeepImmutable<Quaternion>, tangent2: DeepImmutable<Quaternion>, time: number, result: Quaternion)  {
+        const t2 = time * time;
+
+        result.x = (t2 - time) * 6 * value1.x + (3 * t2 - 4 * time + 1) * tangent1.x + (-t2 + time) * 6 * value2.x + (3 * t2 - 2 * time) * tangent2.x;
+        result.y = (t2 - time) * 6 * value1.y + (3 * t2 - 4 * time + 1) * tangent1.y + (-t2 + time) * 6 * value2.y + (3 * t2 - 2 * time) * tangent2.y;
+        result.z = (t2 - time) * 6 * value1.z + (3 * t2 - 4 * time + 1) * tangent1.z + (-t2 + time) * 6 * value2.z + (3 * t2 - 2 * time) * tangent2.z;
+        result.w = (t2 - time) * 6 * value1.w + (3 * t2 - 4 * time + 1) * tangent1.w + (-t2 + time) * 6 * value2.w + (3 * t2 - 2 * time) * tangent2.w;
+    }
 }
 
 /**
  * Class used to store matrix data (4x4)
  */
 export class Matrix {
+
+    /**
+     * Gets the precision of matrix computations
+     */
+    public static get Use64Bits(): boolean {
+        return PerformanceConfigurator.MatrixUse64Bits;
+    }
+
     private static _updateFlagSeed = 0;
     private static _identityReadOnly = Matrix.Identity() as DeepImmutable<Matrix>;
 
@@ -3566,12 +3960,12 @@ export class Matrix {
      */
     public updateFlag: number = -1;
 
-    private readonly _m: Float32Array = new Float32Array(16);
+    private readonly _m: Float32Array | Array<number>;
 
     /**
      * Gets the internal data of the matrix
      */
-    public get m(): DeepImmutable<Float32Array> { return this._m; }
+    public get m(): DeepImmutable<Float32Array | Array<number>> { return this._m; }
 
     /** @hidden */
     public _markAsUpdated() {
@@ -3595,6 +3989,11 @@ export class Matrix {
      * Creates an empty matrix (filled with zeros)
      */
     public constructor() {
+        if (PerformanceConfigurator.MatrixTrackPrecisionChange) {
+            PerformanceConfigurator.MatrixTrackedMatrices!.push(this);
+        }
+
+        this._m = new PerformanceConfigurator.MatrixCurrentType(16);
         this._updateIdentityStatus(false);
     }
 
@@ -3681,17 +4080,17 @@ export class Matrix {
     // Methods
 
     /**
-     * Returns the matrix as a Float32Array
+     * Returns the matrix as a Float32Array or Array<number>
      * @returns the matrix underlying array
      */
-    public toArray(): DeepImmutable<Float32Array> {
+    public toArray(): DeepImmutable<Float32Array | Array<number>> {
         return this._m;
     }
     /**
-     * Returns the matrix as a Float32Array
+     * Returns the matrix as a Float32Array or Array<number>
     * @returns the matrix underlying array.
     */
-    public asArray(): DeepImmutable<Float32Array> {
+    public asArray(): DeepImmutable<Float32Array | Array<number>> {
         return this._m;
     }
 
@@ -3969,7 +4368,7 @@ export class Matrix {
      * @param offset defines the offset in the target array where to start storing values
      * @returns the current matrix
      */
-    public copyToArray(array: Float32Array, offset: number = 0): Matrix {
+    public copyToArray(array: Float32Array | Array<number>, offset: number = 0): Matrix {
         let source = this._m;
         array[offset] = source[0];
         array[offset + 1] = source[1];
@@ -4019,7 +4418,7 @@ export class Matrix {
      * @param offset defines the offset in the target array where to start storing values
      * @returns the current matrix
      */
-    public multiplyToArray(other: DeepImmutable<Matrix>, result: Float32Array, offset: number): Matrix {
+    public multiplyToArray(other: DeepImmutable<Matrix>, result: Float32Array | Array<number>, offset: number): Matrix {
         const m = this._m;
         const otherM = other.m;
         var tm0 = m[0], tm1 = m[1], tm2 = m[2], tm3 = m[3];
@@ -4382,7 +4781,7 @@ export class Matrix {
      * @param scale defines the scaling factor
      * @param result defines the target matrix
      */
-    public static FromFloat32ArrayToRefScaled(array: DeepImmutable<Float32Array>, offset: number, scale: number, result: Matrix) {
+    public static FromFloat32ArrayToRefScaled(array: DeepImmutable<Float32Array | Array<number>>, offset: number, scale: number, result: Matrix) {
         for (var index = 0; index < 16; index++) {
             result._m[index] = array[index + offset] * scale;
         }
@@ -4718,16 +5117,26 @@ export class Matrix {
      * @param result defines the target matrix
      */
     public static RotationAlignToRef(from: DeepImmutable<Vector3>, to: DeepImmutable<Vector3>, result: Matrix): void {
-        const v = Vector3.Cross(to, from);
         const c = Vector3.Dot(to, from);
-        const k = 1 / (1 + c);
-
         const m = result._m;
-        m[0] = v._x * v._x * k + c; m[1] = v._y * v._x * k - v._z; m[2] = v._z * v._x * k + v._y; m[3] = 0;
-        m[4] = v._x * v._y * k + v._z; m[5] = v._y * v._y * k + c; m[6] = v._z * v._y * k - v._x; m[7] = 0;
-        m[8] = v._x * v._z * k - v._y; m[9] = v._y * v._z * k + v._x; m[10] = v._z * v._z * k + c; m[11] = 0;
-        m[12] = 0; m[13] = 0; m[14] = 0; m[15] = 1;
+        if (c < (-1 + Epsilon))
+        {
+            // from and to are colinear and opposite direction.
+            // compute a PI rotation on Z axis
+            m[0] = -1; m[1] =  0; m[2] =  0; m[3] =  0;
+            m[4] =  0; m[5] = -1; m[6] =  0; m[7] =  0;
+            m[8] =  0; m[9] =  0; m[10] = 1; m[11] = 0;
+        }
+        else
+        {
+            const v = Vector3.Cross(to, from);
+            const k = 1 / (1 + c);
 
+            m[0] = v._x * v._x * k + c; m[1] = v._y * v._x * k - v._z; m[2] = v._z * v._x * k + v._y; m[3] = 0;
+            m[4] = v._x * v._y * k + v._z; m[5] = v._y * v._y * k + c; m[6] = v._z * v._y * k - v._x; m[7] = 0;
+            m[8] = v._x * v._z * k - v._y; m[9] = v._y * v._z * k + v._x; m[10] = v._z * v._z * k + c; m[11] = 0;
+        }
+        m[12] = 0; m[13] = 0; m[14] = 0; m[15] = 1;
         result._markAsUpdated();
     }
 
@@ -4735,7 +5144,7 @@ export class Matrix {
      * Creates a rotation matrix
      * @param yaw defines the yaw angle in radians (Y axis)
      * @param pitch defines the pitch angle in radians (X axis)
-     * @param roll defines the roll angle in radians (X axis)
+     * @param roll defines the roll angle in radians (Z axis)
      * @returns the new rotation matrix
      */
     public static RotationYawPitchRoll(yaw: number, pitch: number, roll: number): Matrix {
@@ -4748,7 +5157,7 @@ export class Matrix {
      * Creates a rotation matrix and stores it in a given matrix
      * @param yaw defines the yaw angle in radians (Y axis)
      * @param pitch defines the pitch angle in radians (X axis)
-     * @param roll defines the roll angle in radians (X axis)
+     * @param roll defines the roll angle in radians (Z axis)
      * @param result defines the target matrix
      */
     public static RotationYawPitchRollToRef(yaw: number, pitch: number, roll: number, result: Matrix): void {
@@ -5016,6 +5425,77 @@ export class Matrix {
     }
 
     /**
+     * Gets a new rotation matrix used to rotate an entity so as it looks in the direction specified by forward from the eye position, the up direction being oriented like "up".
+     * This function works in left handed mode
+     * @param forward defines the forward direction - Must be normalized and orthogonal to up.
+     * @param up defines the up vector for the entity - Must be normalized and orthogonal to forward.
+     * @returns the new matrix
+     */
+    public static LookDirectionLH(forward: DeepImmutable<Vector3>, up: DeepImmutable<Vector3>): Matrix {
+        var result = new Matrix();
+        Matrix.LookDirectionLHToRef(forward, up, result);
+        return result;
+    }
+
+    /**
+     * Sets the given "result" Matrix to a rotation matrix used to rotate an entity so that it looks in the direction of forward, the up direction being oriented like "up".
+     * This function works in left handed mode
+     * @param forward defines the forward direction - Must be normalized and orthogonal to up.
+     * @param up defines the up vector for the entity - Must be normalized and orthogonal to forward.
+     * @param result defines the target matrix
+     */
+    public static LookDirectionLHToRef(forward: DeepImmutable<Vector3>, up: DeepImmutable<Vector3>, result: Matrix): void {
+        const back = MathTmp.Vector3[0];
+        back.copyFrom(forward);
+        back.scaleInPlace(-1);
+        const left = MathTmp.Vector3[1];
+        Vector3.CrossToRef(up, back, left);
+
+        // Generate the rotation matrix.
+        Matrix.FromValuesToRef(
+            left._x, left._y, left._z, 0.0,
+            up._x, up._y, up._z, 0.0,
+            back._x, back._y, back._z, 0.0,
+            0, 0, 0, 1.0,
+            result
+        );
+    }
+
+    /**
+    * Gets a new rotation matrix used to rotate an entity so as it looks in the direction specified by forward from the eye position, the up Vector3 being oriented like "up".
+    * This function works in right handed mode
+    * @param forward defines the forward direction - Must be normalized and orthogonal to up.
+    * @param up defines the up vector for the entity - Must be normalized and orthogonal to forward.
+    * @returns the new matrix
+    */
+    public static LookDirectionRH(forward: DeepImmutable<Vector3>, up: DeepImmutable<Vector3>): Matrix {
+        var result = new Matrix();
+        Matrix.LookDirectionRHToRef(forward, up, result);
+        return result;
+    }
+
+    /**
+     * Sets the given "result" Matrix to a rotation matrix used to rotate an entity so that it looks in the direction of forward, the up vector3 being oriented like "up".
+     * This function works in right handed mode
+     * @param forward defines the forward direction - Must be normalized and orthogonal to up.
+     * @param up defines the up vector for the entity - Must be normalized and orthogonal to forward.
+     * @param result defines the target matrix
+     */
+    public static LookDirectionRHToRef(forward: DeepImmutable<Vector3>, up: DeepImmutable<Vector3>, result: Matrix): void {
+        const right = MathTmp.Vector3[2];
+        Vector3.CrossToRef(up, forward, right);
+
+        // Generate the rotation matrix.
+        Matrix.FromValuesToRef(
+            right._x, right._y, right._z, 0.0,
+            up._x, up._y, up._z, 0.0,
+            forward._x, forward._y, forward._z, 0.0,
+            0, 0, 0, 1.0,
+            result
+        );
+    }
+
+    /**
      * Create a left-handed orthographic projection matrix
      * @param width defines the viewport width
      * @param height defines the viewport height
@@ -5197,8 +5677,8 @@ export class Matrix {
         let t = 1.0 / (Math.tan(fov * 0.5));
         let a = isVerticalFovFixed ? (t / aspect) : t;
         let b = isVerticalFovFixed ? t : (t * aspect);
-        let c = (f + n) / (f - n);
-        let d = -2.0 * f * n / (f - n);
+        let c = f !== 0 ? (f + n) / (f - n) : 1;
+        let d = f !== 0 ? -2.0 * f * n / (f - n) : -2 * n;
 
         Matrix.FromValuesToRef(
             a, 0.0, 0.0, 0.0,
@@ -5268,8 +5748,8 @@ export class Matrix {
         let t = 1.0 / (Math.tan(fov * 0.5));
         let a = isVerticalFovFixed ? (t / aspect) : t;
         let b = isVerticalFovFixed ? t : (t * aspect);
-        let c = -(f + n) / (f - n);
-        let d = -2 * f * n / (f - n);
+        let c = f !== 0 ? -(f + n) / (f - n) : -1;
+        let d = f !== 0 ? -2 * f * n / (f - n) : -2 * n;
 
         Matrix.FromValuesToRef(
             a, 0.0, 0.0, 0.0,
@@ -5378,22 +5858,24 @@ export class Matrix {
      * @param matrix defines the matrix to use
      * @returns a new Float32Array array with 4 elements : the 2x2 matrix extracted from the given matrix
      */
-    public static GetAsMatrix2x2(matrix: DeepImmutable<Matrix>): Float32Array {
+    public static GetAsMatrix2x2(matrix: DeepImmutable<Matrix>): Float32Array | Array<number> {
         const m = matrix.m;
-        return new Float32Array([m[0], m[1], m[4], m[5]]);
+        const arr = [m[0], m[1], m[4], m[5]];
+        return PerformanceConfigurator.MatrixUse64Bits ? arr : new Float32Array(arr);
     }
     /**
      * Extracts a 3x3 matrix from a given matrix and store the result in a Float32Array
      * @param matrix defines the matrix to use
      * @returns a new Float32Array array with 9 elements : the 3x3 matrix extracted from the given matrix
      */
-    public static GetAsMatrix3x3(matrix: DeepImmutable<Matrix>): Float32Array {
+    public static GetAsMatrix3x3(matrix: DeepImmutable<Matrix>): Float32Array | Array<number> {
         const m = matrix.m;
-        return new Float32Array([
+        const arr = [
             m[0], m[1], m[2],
             m[4], m[5], m[6],
             m[8], m[9], m[10]
-        ]);
+        ];
+        return PerformanceConfigurator.MatrixUse64Bits ? arr : new Float32Array(arr);
     }
 
     /**

@@ -18,6 +18,11 @@ export interface VideoTextureSettings {
     autoPlay?: boolean;
 
     /**
+     * Applies `muted` to video, if specified
+     */
+    muted?: boolean;
+
+    /**
      * Applies `loop` to video, if specified
      */
     loop?: boolean;
@@ -52,7 +57,7 @@ export class VideoTexture extends Texture {
     private _onUserActionRequestedObservable: Nullable<Observable<Texture>> = null;
 
     /**
-     * Event triggerd when a dom action is required by the user to play the video.
+     * Event triggered when a dom action is required by the user to play the video.
      * This happens due to recent changes in browser policies preventing video to auto start.
      */
     public get onUserActionRequestedObservable(): Observable<Texture> {
@@ -110,12 +115,14 @@ export class VideoTexture extends Texture {
         if (settings.poster) {
             this.video.poster = settings.poster;
         }
-
         if (settings.autoPlay !== undefined) {
             this.video.autoplay = settings.autoPlay;
         }
         if (settings.loop !== undefined) {
             this.video.loop = settings.loop;
+        }
+        if (settings.muted !== undefined) {
+            this.video.muted = settings.muted;
         }
 
         this.video.setAttribute("playsinline", "");
@@ -126,6 +133,10 @@ export class VideoTexture extends Texture {
         this._createInternalTextureOnEvent = (settings.poster && !settings.autoPlay) ? "play" : "canplay";
         this.video.addEventListener(this._createInternalTextureOnEvent, this._createInternalTexture);
 
+        if (settings.autoPlay) {
+            this.video.play();
+        }
+
         const videoHasEnoughData = (this.video.readyState >= this.video.HAVE_CURRENT_DATA);
         if (settings.poster &&
             (!settings.autoPlay || !videoHasEnoughData)) {
@@ -135,6 +146,14 @@ export class VideoTexture extends Texture {
         else if (videoHasEnoughData) {
             this._createInternalTexture();
         }
+    }
+
+    /**
+     * Get the current class name of the video texture useful for serialization or dynamic coding.
+     * @returns "VideoTexture"
+     */
+     public getClassName(): string {
+        return "VideoTexture";
     }
 
     private _getName(src: string | string[] | HTMLVideoElement): string {
@@ -150,6 +169,9 @@ export class VideoTexture extends Texture {
     }
 
     private _getVideo(src: string | string[] | HTMLVideoElement): HTMLVideoElement {
+        if ((<any>src).isNative) {
+            return <HTMLVideoElement>src;
+        }
         if (src instanceof HTMLVideoElement) {
             Tools.SetCorsBehavior(src.currentSrc, src);
             return src;
@@ -205,7 +227,6 @@ export class VideoTexture extends Texture {
             this.video.onplaying = () => {
                 this.video.muted = oldMuted;
                 this.video.onplaying = oldHandler;
-                this._texture!.isReady = true;
                 this._updateInternalTexture();
                 if (!error) {
                     this.video.pause();
@@ -229,7 +250,6 @@ export class VideoTexture extends Texture {
             }
             else {
                 this.video.onplaying = oldHandler;
-                this._texture.isReady = true;
                 this._updateInternalTexture();
                 if (this.onLoadObservable.hasObservers()) {
                     this.onLoadObservable.notifyObservers(this);
@@ -237,7 +257,6 @@ export class VideoTexture extends Texture {
             }
         }
         else {
-            this._texture.isReady = true;
             this._updateInternalTexture();
             if (this.onLoadObservable.hasObservers()) {
                 this.onLoadObservable.notifyObservers(this);
@@ -277,7 +296,7 @@ export class VideoTexture extends Texture {
 
     /**
      * Update Texture in `manual` mode. Does not do anything if not visible or paused.
-     * @param isVisible Visibility state, detected by user using `scene.getActiveMeshes()` or othervise.
+     * @param isVisible Visibility state, detected by user using `scene.getActiveMeshes()` or otherwise.
      */
     public updateTexture(isVisible: boolean): void {
         if (!isVisible) {
@@ -291,7 +310,7 @@ export class VideoTexture extends Texture {
     }
 
     protected _updateInternalTexture = (): void => {
-        if (this._texture == null || !this._texture.isReady) {
+        if (this._texture == null) {
             return;
         }
         if (this.video.readyState < this.video.HAVE_CURRENT_DATA) {
@@ -358,10 +377,22 @@ export class VideoTexture extends Texture {
      * Creates a video texture straight from a stream.
      * @param scene Define the scene the texture should be created in
      * @param stream Define the stream the texture should be created from
+     * @param constraints video constraints
      * @returns The created video texture as a promise
      */
-    public static CreateFromStreamAsync(scene: Scene, stream: MediaStream): Promise<VideoTexture> {
-        var video = document.createElement("video");
+    public static CreateFromStreamAsync(scene: Scene, stream: MediaStream, constraints: any): Promise<VideoTexture> {
+        var video = scene.getEngine().createVideoElement(constraints);
+
+        if (scene.getEngine()._badOS) {
+            // Yes... I know and I hope to remove it soon...
+            document.body.appendChild(video);
+            video.style.transform = 'scale(0.0001, 0.0001)';
+            video.style.opacity = '0';
+            video.style.position = 'fixed';
+            video.style.bottom = '0px';
+            video.style.right = '0px';
+        }
+
         video.setAttribute('autoplay', '');
         video.setAttribute('muted', 'true');
         video.setAttribute('playsinline', '');
@@ -421,7 +452,7 @@ export class VideoTexture extends Texture {
                     audio: audioConstaints
                 })
                 .then((stream) => {
-                    return this.CreateFromStreamAsync(scene, stream);
+                    return this.CreateFromStreamAsync(scene, stream, constraints);
                 });
         }
         else {
@@ -448,7 +479,7 @@ export class VideoTexture extends Texture {
                         audio: audioConstaints
                     },
                     (stream: any) => {
-                        return this.CreateFromStreamAsync(scene, stream);
+                        return this.CreateFromStreamAsync(scene, stream, constraints);
                     },
                     function(e: MediaStreamError) {
                         Logger.Error(e.name);

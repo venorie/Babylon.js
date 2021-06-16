@@ -486,7 +486,7 @@ export class Animation {
      */
     public get hasRunningRuntimeAnimations(): boolean {
         for (var runtimeAnimation of this._runtimeAnimations) {
-            if (!runtimeAnimation.isStopped) {
+            if (!runtimeAnimation.isStopped()) {
                 return true;
             }
         }
@@ -660,7 +660,7 @@ export class Animation {
      * Sets the easing function of the animation
      * @param easingFunction A custom mathematical formula for animation
      */
-    public setEasingFunction(easingFunction: EasingFunction): void {
+    public setEasingFunction(easingFunction: IEasingFunction): void {
         this._easingFunction = easingFunction;
     }
 
@@ -713,7 +713,7 @@ export class Animation {
     }
 
     /**
-     * Interpolates a Vector3 linearl
+     * Interpolates a Vector3 linearly
      * @param startValue Start value of the animation curve
      * @param endValue End value of the animation curve
      * @param gradient Scalar amount to interpolate
@@ -805,6 +805,19 @@ export class Animation {
     }
 
     /**
+     * Evaluate the animation value at a given frame
+     * @param currentFrame defines the frame where we want to evaluate the animation
+     * @returns the animation value
+     */
+    public evaluate(currentFrame: number) {
+        return this._interpolate(currentFrame, {
+            key: 0,
+            repeatCount: 0,
+            loopMode: Animation.ANIMATIONLOOPMODE_CONSTANT
+        });
+    }
+
+    /**
      * @hidden Internal use only
      */
     public _interpolate(currentFrame: number, state: _IAnimationState): any {
@@ -825,7 +838,7 @@ export class Animation {
             }
         }
 
-        for (var key = startKeyIndex; key < keys.length; key++) {
+        for (var key = startKeyIndex; key < keys.length - 1; key++) {
             var endKey = keys[key + 1];
 
             if (endKey.frame >= currentFrame) {
@@ -1029,6 +1042,15 @@ export class Animation {
             switch (dataType) {
                 case Animation.ANIMATIONTYPE_FLOAT:
                     key.values = [animationKey.value];
+                    if (animationKey.inTangent !== undefined) {
+                        key.values.push(animationKey.inTangent);
+                    }
+                    if (animationKey.outTangent !== undefined) {
+                        if (animationKey.inTangent === undefined) {
+                            key.values.push(undefined);
+                        }
+                        key.values.push(animationKey.outTangent);
+                    }
                     break;
                 case Animation.ANIMATIONTYPE_QUATERNION:
                 case Animation.ANIMATIONTYPE_MATRIX:
@@ -1036,6 +1058,15 @@ export class Animation {
                 case Animation.ANIMATIONTYPE_COLOR3:
                 case Animation.ANIMATIONTYPE_COLOR4:
                     key.values = animationKey.value.asArray();
+                    if (animationKey.inTangent != undefined) {
+                        key.values.push(animationKey.inTangent.asArray());
+                    }
+                    if (animationKey.outTangent != undefined) {
+                        if (animationKey.inTangent === undefined) {
+                            key.values.push(undefined);
+                        }
+                        key.values.push(animationKey.outTangent.asArray());
+                    }
                     break;
             }
 
@@ -1276,12 +1307,14 @@ export class Animation {
 
                         if (snippet.animations) {
                             let serializationObject = JSON.parse(snippet.animations);
-                            let output = new Array<Animation>();
-                            for (var serializedAnimation of serializationObject) {
-                                output.push(this.Parse(serializedAnimation));
+                            let outputs = new Array<Animation>();
+                            for (var serializedAnimation of serializationObject.animations) {
+                                let output = this.Parse(serializedAnimation);
+                                output.snippetId = snippetId;
+                                outputs.push(output);
                             }
 
-                            resolve(output);
+                            resolve(outputs);
                         } else {
                             let serializationObject = JSON.parse(snippet.animation);
                             let output = this.Parse(serializationObject);

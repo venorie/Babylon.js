@@ -30,8 +30,9 @@ export class ScreenshotTools {
      * src parameter of an <img> to display it
      * @param mimeType defines the MIME type of the screenshot image (default: image/png).
      * Check your browser for supported MIME types
+     * @param forceDownload force the system to download the image even if a successCallback is provided
      */
-    public static CreateScreenshot(engine: Engine, camera: Camera, size: IScreenshotSize | number, successCallback?: (data: string) => void, mimeType: string = "image/png"): void {
+    public static CreateScreenshot(engine: Engine, camera: Camera, size: IScreenshotSize | number, successCallback?: (data: string) => void, mimeType: string = "image/png", forceDownload = false): void {
         const { height, width } = ScreenshotTools._getScreenshotSize(engine, camera, size);
 
         if (!(height && width)) {
@@ -59,12 +60,21 @@ export class ScreenshotTools {
         var offsetX = Math.max(0, width - newWidth) / 2;
         var offsetY = Math.max(0, height - newHeight) / 2;
 
-        var renderingCanvas = engine.getRenderingCanvas();
-        if (renderContext && renderingCanvas) {
-            renderContext.drawImage(renderingCanvas, offsetX, offsetY, newWidth, newHeight);
-        }
+        engine.onEndFrameObservable.addOnce(() => {
+            var renderingCanvas = engine.getRenderingCanvas();
+            if (renderContext && renderingCanvas) {
+                renderContext.drawImage(renderingCanvas, offsetX, offsetY, newWidth, newHeight);
+            }
 
-        Tools.EncodeScreenshotCanvasData(successCallback, mimeType);
+            if (forceDownload) {
+                Tools.EncodeScreenshotCanvasData(undefined, mimeType);
+                if (successCallback) {
+                    successCallback("");
+                }
+            } else {
+                Tools.EncodeScreenshotCanvasData(successCallback, mimeType);
+            }
+        });
     }
 
     /**
@@ -95,6 +105,26 @@ export class ScreenshotTools {
     }
 
     /**
+     * Captures a screenshot of the current rendering for a specific size. This will render the entire canvas but will generate a blink (due to canvas resize)
+     * @see https://doc.babylonjs.com/how_to/render_scene_on_a_png
+     * @param engine defines the rendering engine
+     * @param camera defines the source camera
+     * @param width defines the expected width
+     * @param height defines the expected height
+     * @param mimeType defines the MIME type of the screenshot image (default: image/png).
+     * Check your browser for supported MIME types
+     * @returns screenshot as a string of base64-encoded characters. This string can be assigned
+     * to the src parameter of an <img> to display it
+     */
+    public static CreateScreenshotWithResizeAsync(engine: Engine, camera: Camera, width: number, height: number, mimeType: string = "image/png"): Promise<void> {
+        return new Promise((resolve, reject) => {
+            ScreenshotTools.CreateScreenshot(engine, camera, { width: width, height: height }, () => {
+                resolve();
+            }, mimeType, true);
+        });
+    }
+
+    /**
      * Generates an image screenshot from the specified camera.
      * @see https://doc.babylonjs.com/how_to/render_scene_on_a_png
      * @param engine The engine to use for rendering
@@ -113,8 +143,9 @@ export class ScreenshotTools {
      * @param antialiasing Whether antialiasing should be turned on or not (default: false)
      * @param fileName A name for for the downloaded file.
      * @param renderSprites Whether the sprites should be rendered or not (default: false)
+     * @param enableStencilBuffer Whether the stencil buffer should be enabled or not (default: false)
      */
-    public static CreateScreenshotUsingRenderTarget(engine: Engine, camera: Camera, size: IScreenshotSize | number, successCallback?: (data: string) => void, mimeType: string = "image/png", samples: number = 1, antialiasing: boolean = false, fileName?: string, renderSprites: boolean = false): void {
+    public static CreateScreenshotUsingRenderTarget(engine: Engine, camera: Camera, size: IScreenshotSize | number, successCallback?: (data: string) => void, mimeType: string = "image/png", samples: number = 1, antialiasing: boolean = false, fileName?: string, renderSprites: boolean = false, enableStencilBuffer: boolean = false): void {
         const { height, width } = ScreenshotTools._getScreenshotSize(engine, camera, size);
         let targetTextureSize = { width, height };
 
@@ -125,42 +156,46 @@ export class ScreenshotTools {
 
         var scene = camera.getScene();
         var previousCamera: Nullable<Camera> = null;
+        var previousCameras = scene.activeCameras;
+
+        scene.activeCameras = null;
 
         if (scene.activeCamera !== camera) {
             previousCamera = scene.activeCamera;
             scene.activeCamera = camera;
         }
 
-        var renderCanvas = engine.getRenderingCanvas();
-        if (!renderCanvas) {
-            Logger.Error("No rendering canvas found !");
-            return;
-        }
-
-        var originalSize = { width: renderCanvas.width, height: renderCanvas.height };
-        engine.setSize(width, height);
-        scene.render();
+        scene.render(); // make sure the scene is ready to be rendered in the RTT with the right list of active meshes (which depends on the camera, that may have been changed above)
 
         // At this point size can be a number, or an object (according to engine.prototype.createRenderTargetTexture method)
-        var texture = new RenderTargetTexture("screenShot", targetTextureSize, scene, false, false, Constants.TEXTURETYPE_UNSIGNED_INT, false, Texture.NEAREST_SAMPLINGMODE);
+        var texture = new RenderTargetTexture("screenShot", targetTextureSize, scene, false, false, Constants.TEXTURETYPE_UNSIGNED_INT, false, Texture.NEAREST_SAMPLINGMODE, undefined, enableStencilBuffer, undefined, undefined, undefined, samples);
         texture.renderList = null;
         texture.samples = samples;
         texture.renderSprites = renderSprites;
-        texture.onAfterRenderObservable.add(() => {
-            Tools.DumpFramebuffer(width, height, engine, successCallback, mimeType, fileName);
+
+        engine.onEndFrameObservable.addOnce(() => {
+            texture.readPixels(undefined, undefined, undefined, false)!.then((data) => {
+                Tools.DumpData(width, height, data, successCallback as (data: string | ArrayBuffer) => void, mimeType, fileName, true);
+                texture.dispose();
+            });
         });
 
         const renderToTexture = () => {
+            // render the RTT
             scene.incrementRenderId();
             scene.resetCachedMaterial();
             texture.render(true);
-            texture.dispose();
 
+            // re-render the scene after the camera has been reset to the original camera to avoid a flicker that could occur
+            // if the camera used for the RTT rendering stays in effect for the next frame (and if that camera was different from the original camera)
+            scene.incrementRenderId();
+            scene.resetCachedMaterial();
             if (previousCamera) {
                 scene.activeCamera = previousCamera;
             }
-            engine.setSize(originalSize.width, originalSize.height);
+            scene.activeCameras = previousCameras;
             camera.getProjectionMatrix(true); // Force cache refresh;
+            scene.render();
         };
 
         if (antialiasing) {

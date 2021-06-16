@@ -3,12 +3,12 @@ import * as React from "react";
 import { Observable } from "babylonjs/Misc/observable";
 
 import { PropertyChangedEvent } from "../../../../propertyChangedEvent";
-import { LineContainerComponent } from "../../../lineContainerComponent";
-import { TextLineComponent } from "../../../lines/textLineComponent";
-import { LockObject } from "../lockObject";
+import { LineContainerComponent } from "../../../../../sharedUiComponents/lines/lineContainerComponent";
+import { TextLineComponent } from "../../../../../sharedUiComponents/lines/textLineComponent";
+import { LockObject } from "../../../../../sharedUiComponents/tabs/propertyGrids/lockObject";
 import { GlobalState } from '../../../../globalState';
 import { Bone } from 'babylonjs/Bones/bone';
-import { Vector3LineComponent } from '../../../lines/vector3LineComponent';
+import { Vector3LineComponent } from '../../../../../sharedUiComponents/lines/vector3LineComponent';
 import { QuaternionLineComponent } from '../../../lines/quaternionLineComponent';
 
 interface IBonePropertyGridComponentProps {
@@ -37,7 +37,7 @@ export class BonePropertyGridComponent extends React.Component<IBonePropertyGrid
 
         return (
             <div className="pane">
-                <LineContainerComponent globalState={this.props.globalState} title="GENERAL">
+                <LineContainerComponent title="GENERAL" selection={this.props.globalState}>
                     <TextLineComponent label="Name" value={bone.name} />
                     <TextLineComponent label="Index" value={bone.getIndex().toString()} />
                     <TextLineComponent label="Unique ID" value={bone.uniqueId.toString()} />
@@ -50,7 +50,7 @@ export class BonePropertyGridComponent extends React.Component<IBonePropertyGrid
                         <TextLineComponent label="Linked node" value={bone.getTransformNode()!.name} onLink={() => this.onTransformNodeLink()}/>
                     }
                 </LineContainerComponent>
-                <LineContainerComponent globalState={this.props.globalState} title="TRANSFORMATIONS">
+                <LineContainerComponent title="TRANSFORMATIONS" selection={this.props.globalState}>
                     <Vector3LineComponent label="Position" target={bone} propertyName="position" onPropertyChangedObservable={this.props.onPropertyChangedObservable} />
                     {
                         !bone.rotationQuaternion &&
@@ -61,7 +61,7 @@ export class BonePropertyGridComponent extends React.Component<IBonePropertyGrid
                         <QuaternionLineComponent label="Rotation" useEuler={this.props.globalState.onlyUseEulers} target={bone} propertyName="rotationQuaternion" onPropertyChangedObservable={this.props.onPropertyChangedObservable} />
                     }
                     <Vector3LineComponent label="Scaling" target={bone} propertyName="scaling" onPropertyChangedObservable={this.props.onPropertyChangedObservable} />
-                </LineContainerComponent>
+                </LineContainerComponent>                
             </div>
         );
     }

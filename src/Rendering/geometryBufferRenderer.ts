@@ -1,22 +1,27 @@
 import { Matrix } from "../Maths/math.vector";
-import { VertexBuffer } from "../Meshes/buffer";
+import { VertexBuffer } from "../Buffers/buffer";
 import { SubMesh } from "../Meshes/subMesh";
 import { Mesh } from "../Meshes/mesh";
 import { Constants } from "../Engines/constants";
 import { SmartArray } from "../Misc/smartArray";
 import { Texture } from "../Materials/Textures/texture";
+import { InternalTexture } from "../Materials/Textures/internalTexture";
 import { MultiRenderTarget } from "../Materials/Textures/multiRenderTarget";
-import { Effect } from "../Materials/effect";
+import { DrawWrapper } from "../Materials/drawWrapper";
+import { PrePassRenderer } from "../Rendering/prePassRenderer";
 import { MaterialHelper } from "../Materials/materialHelper";
 import { Scene } from "../scene";
 import { AbstractMesh } from "../Meshes/abstractMesh";
-import { Color4 } from '../Maths/math.color';
-import { StandardMaterial } from '../Materials/standardMaterial';
-import { PBRMaterial } from '../Materials/PBR/pbrMaterial';
+import { Color4 } from "../Maths/math.color";
+import { _DevTools } from "../Misc/devTools";
+import { Observer } from "../Misc/observable";
+import { Engine } from "../Engines/engine";
+import { Nullable } from "../types";
+import { Material } from "../Materials/material";
 
 import "../Shaders/geometry.fragment";
 import "../Shaders/geometry.vertex";
-import { _DevTools } from '../Misc/devTools';
+import { MaterialFlags } from "../Materials/materialFlags";
 
 /** @hidden */
 interface ISavedTransformationMatrix {
@@ -25,24 +30,34 @@ interface ISavedTransformationMatrix {
 }
 
 /**
- * This renderer is helpfull to fill one of the render target with a geometry buffer.
+ * This renderer is helpful to fill one of the render target with a geometry buffer.
  */
 export class GeometryBufferRenderer {
+    /**
+     * Constant used to retrieve the depth texture index in the G-Buffer textures array
+     * using getIndex(GeometryBufferRenderer.DEPTH_TEXTURE_INDEX)
+     */
+    public static readonly DEPTH_TEXTURE_TYPE = 0;
+    /**
+     * Constant used to retrieve the normal texture index in the G-Buffer textures array
+     * using getIndex(GeometryBufferRenderer.NORMAL_TEXTURE_INDEX)
+     */
+    public static readonly NORMAL_TEXTURE_TYPE = 1;
     /**
      * Constant used to retrieve the position texture index in the G-Buffer textures array
      * using getIndex(GeometryBufferRenderer.POSITION_TEXTURE_INDEX)
      */
-    public static readonly POSITION_TEXTURE_TYPE = 1;
+    public static readonly POSITION_TEXTURE_TYPE = 2;
     /**
      * Constant used to retrieve the velocity texture index in the G-Buffer textures array
      * using getIndex(GeometryBufferRenderer.VELOCITY_TEXTURE_INDEX)
      */
-    public static readonly VELOCITY_TEXTURE_TYPE = 2;
+    public static readonly VELOCITY_TEXTURE_TYPE = 3;
     /**
      * Constant used to retrieve the reflectivity texture index in the G-Buffer textures array
      * using the getIndex(GeometryBufferRenderer.REFLECTIVITY_TEXTURE_TYPE)
      */
-    public static readonly REFLECTIVITY_TEXTURE_TYPE = 3;
+    public static readonly REFLECTIVITY_TEXTURE_TYPE = 4;
 
     /**
      * Dictionary used to store the previous transformation matrices of each rendered mesh
@@ -66,6 +81,7 @@ export class GeometryBufferRenderer {
     public renderTransparentMeshes = true;
 
     private _scene: Scene;
+    private _resizeObserver: Nullable<Observer<Engine>> = null;
     private _multiRenderTarget: MultiRenderTarget;
     private _ratio: number;
     private _enablePosition: boolean = false;
@@ -75,19 +91,112 @@ export class GeometryBufferRenderer {
     private _positionIndex: number = -1;
     private _velocityIndex: number = -1;
     private _reflectivityIndex: number = -1;
+    private _depthIndex: number = -1;
+    private _normalIndex: number = -1;
 
-    protected _effect: Effect;
+    private _linkedWithPrePass: boolean = false;
+    private _prePassRenderer: PrePassRenderer;
+    private _attachments: number[];
+    private _useUbo: boolean;
+
+    protected _drawWrapper: DrawWrapper;
     protected _cachedDefines: string;
+
+    /**
+     * @hidden
+     * Sets up internal structures to share outputs with PrePassRenderer
+     * This method should only be called by the PrePassRenderer itself
+     */
+    public _linkPrePassRenderer(prePassRenderer: PrePassRenderer) {
+        this._linkedWithPrePass = true;
+        this._prePassRenderer = prePassRenderer;
+
+        if (this._multiRenderTarget) {
+            // prevents clearing of the RT since it's done by prepass
+            this._multiRenderTarget.onClearObservable.clear();
+            this._multiRenderTarget.onClearObservable.add((engine) => {
+                // pass
+            });
+        }
+    }
+
+    /**
+     * @hidden
+     * Separates internal structures from PrePassRenderer so the geometry buffer can now operate by itself.
+     * This method should only be called by the PrePassRenderer itself
+     */
+    public _unlinkPrePassRenderer() {
+        this._linkedWithPrePass = false;
+        this._createRenderTargets();
+    }
+
+    /**
+     * @hidden
+     * Resets the geometry buffer layout
+     */
+    public _resetLayout() {
+        this._enablePosition = false;
+        this._enableReflectivity = false;
+        this._enableVelocity = false;
+        this._attachments = [];
+    }
+
+    /**
+     * @hidden
+     * Replaces a texture in the geometry buffer renderer
+     * Useful when linking textures of the prepass renderer
+     */
+    public _forceTextureType(geometryBufferType: number, index: number) {
+        if (geometryBufferType === GeometryBufferRenderer.POSITION_TEXTURE_TYPE) {
+            this._positionIndex = index;
+            this._enablePosition = true;
+        } else if (geometryBufferType === GeometryBufferRenderer.VELOCITY_TEXTURE_TYPE) {
+            this._velocityIndex = index;
+            this._enableVelocity = true;
+        } else if (geometryBufferType === GeometryBufferRenderer.REFLECTIVITY_TEXTURE_TYPE) {
+            this._reflectivityIndex = index;
+            this._enableReflectivity = true;
+        } else if (geometryBufferType === GeometryBufferRenderer.DEPTH_TEXTURE_TYPE) {
+            this._depthIndex = index;
+        } else if (geometryBufferType === GeometryBufferRenderer.NORMAL_TEXTURE_TYPE) {
+            this._normalIndex = index;
+        }
+    }
+
+    /**
+     * @hidden
+     * Sets texture attachments
+     * Useful when linking textures of the prepass renderer
+     */
+    public _setAttachments(attachments: number[]) {
+        this._attachments = attachments;
+    }
+
+    /**
+     * @hidden
+     * Replaces the first texture which is hard coded as a depth texture in the geometry buffer
+     * Useful when linking textures of the prepass renderer
+     */
+    public _linkInternalTexture(internalTexture: InternalTexture) {
+        this._multiRenderTarget._texture = internalTexture;
+    }
+
+    /**
+     * Gets the render list (meshes to be rendered) used in the G buffer.
+     */
+    public get renderList() {
+        return this._multiRenderTarget.renderList;
+    }
 
     /**
      * Set the render list (meshes to be rendered) used in the G buffer.
      */
-    public set renderList(meshes: Mesh[]) {
+    public set renderList(meshes: Nullable<AbstractMesh[]>) {
         this._multiRenderTarget.renderList = meshes;
     }
 
     /**
-     * Gets wether or not G buffer are supported by the running hardware.
+     * Gets whether or not G buffer are supported by the running hardware.
      * This requires draw buffer supports
      */
     public get isSupported(): boolean {
@@ -101,10 +210,14 @@ export class GeometryBufferRenderer {
      */
     public getTextureIndex(textureType: number): number {
         switch (textureType) {
-            case GeometryBufferRenderer.POSITION_TEXTURE_TYPE: return this._positionIndex;
-            case GeometryBufferRenderer.VELOCITY_TEXTURE_TYPE: return this._velocityIndex;
-            case GeometryBufferRenderer.REFLECTIVITY_TEXTURE_TYPE: return this._reflectivityIndex;
-            default: return -1;
+            case GeometryBufferRenderer.POSITION_TEXTURE_TYPE:
+                return this._positionIndex;
+            case GeometryBufferRenderer.VELOCITY_TEXTURE_TYPE:
+                return this._velocityIndex;
+            case GeometryBufferRenderer.REFLECTIVITY_TEXTURE_TYPE:
+                return this._reflectivityIndex;
+            default:
+                return -1;
         }
     }
 
@@ -120,8 +233,12 @@ export class GeometryBufferRenderer {
      */
     public set enablePosition(enable: boolean) {
         this._enablePosition = enable;
-        this.dispose();
-        this._createRenderTargets();
+
+        // PrePass handles index and texture links
+        if (!this._linkedWithPrePass) {
+            this.dispose();
+            this._createRenderTargets();
+        }
     }
 
     /**
@@ -132,7 +249,7 @@ export class GeometryBufferRenderer {
     }
 
     /**
-     * Sets wether or not objects velocities are enabled for the G buffer.
+     * Sets whether or not objects velocities are enabled for the G buffer.
      */
     public set enableVelocity(enable: boolean) {
         this._enableVelocity = enable;
@@ -141,8 +258,12 @@ export class GeometryBufferRenderer {
             this._previousTransformationMatrices = {};
         }
 
-        this.dispose();
-        this._createRenderTargets();
+        if (!this._linkedWithPrePass) {
+            this.dispose();
+            this._createRenderTargets();
+        }
+
+        this._scene.needsPreviousWorldMatrices = enable;
     }
 
     /**
@@ -153,12 +274,15 @@ export class GeometryBufferRenderer {
     }
 
     /**
-     * Sets wether or not objects roughness are enabled for the G buffer.
+     * Sets whether or not objects roughness are enabled for the G buffer.
      */
     public set enableReflectivity(enable: boolean) {
         this._enableReflectivity = enable;
-        this.dispose();
-        this._createRenderTargets();
+
+        if (!this._linkedWithPrePass) {
+            this.dispose();
+            this._createRenderTargets();
+        }
     }
 
     /**
@@ -179,7 +303,7 @@ export class GeometryBufferRenderer {
     /** @hidden */
     public static _SceneComponentInitialization: (scene: Scene) => void = (_) => {
         throw _DevTools.WarnImport("GeometryBufferRendererSceneComponent");
-    }
+    };
 
     /**
      * Creates a new G Buffer for the scene
@@ -189,6 +313,8 @@ export class GeometryBufferRenderer {
     constructor(scene: Scene, ratio: number = 1) {
         this._scene = scene;
         this._ratio = ratio;
+        this._useUbo = scene.getEngine().supportsUniformBuffers;
+        this._drawWrapper = new DrawWrapper(scene.getEngine());
 
         GeometryBufferRenderer._SceneComponentInitialization(this._scene);
 
@@ -197,13 +323,13 @@ export class GeometryBufferRenderer {
     }
 
     /**
-     * Checks wether everything is ready to render a submesh to the G buffer.
+     * Checks whether everything is ready to render a submesh to the G buffer.
      * @param subMesh the submesh to check readiness for
      * @param useInstances is the mesh drawn using instance or not
      * @returns true if ready otherwise false
      */
     public isReady(subMesh: SubMesh, useInstances: boolean): boolean {
-        var material = <any> subMesh.getMaterial();
+        var material = <any>subMesh.getMaterial();
 
         if (material && material.disableDepthWrite) {
             return false;
@@ -216,23 +342,26 @@ export class GeometryBufferRenderer {
         // Alpha test
         if (material) {
             let needUv = false;
-            if (material.needAlphaTesting()) {
+            if (material.needAlphaTesting() && material.getAlphaTestTexture()) {
                 defines.push("#define ALPHATEST");
+                defines.push(`#define ALPHATEST_UV${material.getAlphaTestTexture().coordinatesIndex + 1}`);
                 needUv = true;
             }
 
-            if (material.bumpTexture && StandardMaterial.BumpTextureEnabled) {
+            if (material.bumpTexture && MaterialFlags.BumpTextureEnabled) {
                 defines.push("#define BUMP");
-                defines.push("#define BUMPDIRECTUV 0");
+                defines.push(`#define BUMP_UV${material.bumpTexture.coordinatesIndex + 1}`);
                 needUv = true;
             }
 
             if (this._enableReflectivity) {
-                if (material instanceof StandardMaterial && material.specularTexture) {
+                if (material.specularTexture) {
                     defines.push("#define HAS_SPECULAR");
+                    defines.push(`#define REFLECTIVITY_UV${material.specularTexture.coordinatesIndex + 1}`);
                     needUv = true;
-                } else if (material instanceof PBRMaterial && material.reflectivityTexture) {
+                } else if (material.reflectivityTexture) {
                     defines.push("#define HAS_REFLECTIVITY");
+                    defines.push(`#define REFLECTIVITY_UV${material.reflectivityTexture.coordinatesIndex + 1}`);
                     needUv = true;
                 }
             }
@@ -247,6 +376,19 @@ export class GeometryBufferRenderer {
                     attribs.push(VertexBuffer.UV2Kind);
                     defines.push("#define UV2");
                 }
+            }
+        }
+
+        // PrePass
+        if (this._linkedWithPrePass) {
+            defines.push("#define PREPASS");
+            if (this._depthIndex !== -1) {
+                defines.push("#define DEPTH_INDEX " + this._depthIndex);
+                defines.push("#define PREPASS_DEPTH");
+            }
+            if (this._normalIndex !== -1) {
+                defines.push("#define NORMAL_INDEX " + this._normalIndex);
+                defines.push("#define PREPASS_NORMAL");
             }
         }
 
@@ -292,7 +434,9 @@ export class GeometryBufferRenderer {
 
                 defines.push("#define MORPHTARGETS");
                 defines.push("#define NUM_MORPH_INFLUENCERS " + numMorphInfluencers);
-
+                if (morphTargetManager.isUsingTextureForTargets) {
+                    defines.push("#define MORPHTARGETS_TEXTURE");
+                }
                 MaterialHelper.PrepareAttributesForMorphTargetsInfluencers(attribs, mesh, numMorphInfluencers);
             }
         }
@@ -300,31 +444,57 @@ export class GeometryBufferRenderer {
         // Instances
         if (useInstances) {
             defines.push("#define INSTANCES");
-            MaterialHelper.PushAttributesForInstances(attribs);
+            MaterialHelper.PushAttributesForInstances(attribs, this._enableVelocity);
             if (subMesh.getRenderingMesh().hasThinInstances) {
                 defines.push("#define THIN_INSTANCES");
             }
         }
 
         // Setup textures count
-        defines.push("#define RENDER_TARGET_COUNT " + this._multiRenderTarget.textures.length);
+        if (this._linkedWithPrePass) {
+            defines.push("#define RENDER_TARGET_COUNT " + this._attachments.length);
+        } else {
+            defines.push("#define RENDER_TARGET_COUNT " + this._multiRenderTarget.textures.length);
+        }
 
         // Get correct effect
         var join = defines.join("\n");
         if (this._cachedDefines !== join) {
             this._cachedDefines = join;
-            this._effect = this._scene.getEngine().createEffect("geometry",
-                attribs,
-                [
-                    "world", "mBones", "viewProjection", "diffuseMatrix", "view", "previousWorld", "previousViewProjection", "mPreviousBones",
-                    "morphTargetInfluences", "bumpMatrix", "reflectivityMatrix", "vTangentSpaceParams", "vBumpInfos"
-                ],
-                ["diffuseSampler", "bumpSampler", "reflectivitySampler"], join,
-                undefined, undefined, undefined,
-                { buffersCount: this._multiRenderTarget.textures.length - 1, maxSimultaneousMorphTargets: numMorphInfluencers });
+            this._drawWrapper.effect = this._scene.getEngine().createEffect(
+                "geometry",
+                {
+                    attributes: attribs,
+                    uniformsNames: [
+                        "world",
+                        "mBones",
+                        "viewProjection",
+                        "diffuseMatrix",
+                        "view",
+                        "previousWorld",
+                        "previousViewProjection",
+                        "mPreviousBones",
+                        "bumpMatrix",
+                        "reflectivityMatrix",
+                        "vTangentSpaceParams",
+                        "vBumpInfos",
+                        "morphTargetInfluences",
+                        "morphTargetTextureInfo",
+                        "morphTargetTextureIndices",
+                    ],
+                    samplers: ["diffuseSampler", "bumpSampler", "reflectivitySampler", "morphTargets"],
+                    defines: join,
+                    onCompiled: null,
+                    fallbacks: null,
+                    onError: null,
+                    uniformBuffersNames: ["Scene"],
+                    indexParameters: { buffersCount: this._multiRenderTarget.textures.length - 1, maxSimultaneousMorphTargets: numMorphInfluencers },
+                },
+                this._scene.getEngine()
+            );
         }
 
-        return this._effect.isReady();
+        return this._drawWrapper.effect!.isReady();
     }
 
     /**
@@ -353,12 +523,16 @@ export class GeometryBufferRenderer {
      * Disposes the renderer and frees up associated resources.
      */
     public dispose(): void {
+        if (this._resizeObserver) {
+            const engine = this._scene.getEngine();
+            engine.onResizeObservable.remove(this._resizeObserver);
+            this._resizeObserver = null;
+        }
         this.getGBuffer().dispose();
     }
 
-    protected _createRenderTargets(): void {
-        var engine = this._scene.getEngine();
-        var count = 2;
+    private _assignRenderTargetIndices(): number {
+        let count = 2;
 
         if (this._enablePosition) {
             this._positionIndex = count;
@@ -375,9 +549,14 @@ export class GeometryBufferRenderer {
             count++;
         }
 
-        this._multiRenderTarget = new MultiRenderTarget("gBuffer",
-            { width: engine.getRenderWidth() * this._ratio, height: engine.getRenderHeight() * this._ratio }, count, this._scene,
-            { generateMipMaps: false, generateDepthTexture: true, defaultType: Constants.TEXTURETYPE_FLOAT });
+        return count;
+    }
+
+    protected _createRenderTargets(): void {
+        var engine = this._scene.getEngine();
+        var count = this._assignRenderTargetIndices();
+
+        this._multiRenderTarget = new MultiRenderTarget("gBuffer", { width: engine.getRenderWidth() * this._ratio, height: engine.getRenderHeight() * this._ratio }, count, this._scene, { generateMipMaps: false, generateDepthTexture: true, defaultType: Constants.TEXTURETYPE_FLOAT });
         if (!this.isSupported) {
             return;
         }
@@ -389,7 +568,13 @@ export class GeometryBufferRenderer {
 
         // set default depth value to 1.0 (far away)
         this._multiRenderTarget.onClearObservable.add((engine) => {
-            engine.clear(new Color4(0.0, 0.0, 0.0, 1.0), true, true, true);
+            engine.clear(new Color4(0.0, 0.0, 0.0, 0.0), true, true, true);
+        });
+
+        this._resizeObserver = engine.onResizeObservable.add(() => {
+            if (this._multiRenderTarget) {
+                this._multiRenderTarget.resize({ width: engine.getRenderWidth() * this._ratio, height: engine.getRenderHeight() * this._ratio });
+            }
         });
 
         // Custom render function
@@ -398,7 +583,7 @@ export class GeometryBufferRenderer {
             var effectiveMesh = subMesh.getEffectiveMesh();
             var scene = this._scene;
             var engine = scene.getEngine();
-            let material = <any> subMesh.getMaterial();
+            let material = <any>subMesh.getMaterial();
 
             if (!material) {
                 return;
@@ -410,7 +595,7 @@ export class GeometryBufferRenderer {
             if (this._enableVelocity && !this._previousTransformationMatrices[effectiveMesh.uniqueId]) {
                 this._previousTransformationMatrices[effectiveMesh.uniqueId] = {
                     world: Matrix.Identity(),
-                    viewProjection: scene.getTransformMatrix()
+                    viewProjection: scene.getTransformMatrix(),
                 };
 
                 if (renderingMesh.skeleton) {
@@ -419,9 +604,6 @@ export class GeometryBufferRenderer {
                 }
             }
 
-            // Culling
-            engine.setState(material.backFaceCulling, 0, false, scene.useRightHandedSystem);
-
             // Managing instances
             var batch = renderingMesh._getInstancesRenderList(subMesh._id, !!subMesh.getReplacementMesh());
 
@@ -429,66 +611,102 @@ export class GeometryBufferRenderer {
                 return;
             }
 
-            var hardwareInstancedRendering = (engine.getCaps().instancedArrays) && (batch.visibleInstances[subMesh._id] !== null || renderingMesh.hasThinInstances);
+            var hardwareInstancedRendering = engine.getCaps().instancedArrays && (batch.visibleInstances[subMesh._id] !== null || renderingMesh.hasThinInstances);
             var world = effectiveMesh.getWorldMatrix();
 
             if (this.isReady(subMesh, hardwareInstancedRendering)) {
-                engine.enableEffect(this._effect);
-                renderingMesh._bind(subMesh, this._effect, material.fillMode);
+                const effect = this._drawWrapper.effect!;
 
-                this._effect.setMatrix("viewProjection", scene.getTransformMatrix());
-                this._effect.setMatrix("view", scene.getViewMatrix());
+                engine.enableEffect(this._drawWrapper);
+                if (!hardwareInstancedRendering) {
+                    renderingMesh._bind(subMesh, effect, material.fillMode);
+                }
+
+                if (!this._useUbo) {
+                    effect.setMatrix("viewProjection", scene.getTransformMatrix());
+                    effect.setMatrix("view", scene.getViewMatrix());
+                } else {
+                    this._scene.finalizeSceneUbo();
+                    MaterialHelper.BindSceneUniformBuffer(effect, this._scene.getSceneUniformBuffer());
+                }
 
                 if (material) {
+                    var sideOrientation: Nullable<number>;
+                    let instanceDataStorage = (renderingMesh as Mesh)._instanceDataStorage;
+
+                    if (!instanceDataStorage.isFrozen && (material.backFaceCulling || material.overrideMaterialSideOrientation !== null)) {
+                        let mainDeterminant = effectiveMesh._getWorldMatrixDeterminant();
+                        sideOrientation = material.overrideMaterialSideOrientation;
+                        if (sideOrientation == null) {
+                            sideOrientation = material.sideOrientation;
+                        }
+                        if (mainDeterminant < 0) {
+                            sideOrientation = sideOrientation === Material.ClockWiseSideOrientation ? Material.CounterClockWiseSideOrientation : Material.ClockWiseSideOrientation;
+                        }
+                    } else {
+                        sideOrientation = instanceDataStorage.sideOrientation;
+                    }
+
+                    material._preBind(this._drawWrapper, sideOrientation);
+
                     // Alpha test
                     if (material.needAlphaTesting()) {
                         var alphaTexture = material.getAlphaTestTexture();
                         if (alphaTexture) {
-                            this._effect.setTexture("diffuseSampler", alphaTexture);
-                            this._effect.setMatrix("diffuseMatrix", alphaTexture.getTextureMatrix());
+                            effect.setTexture("diffuseSampler", alphaTexture);
+                            effect.setMatrix("diffuseMatrix", alphaTexture.getTextureMatrix());
                         }
                     }
 
                     // Bump
-                    if (material.bumpTexture && scene.getEngine().getCaps().standardDerivatives && StandardMaterial.BumpTextureEnabled) {
-                        this._effect.setFloat3("vBumpInfos", material.bumpTexture.coordinatesIndex, 1.0 / material.bumpTexture.level, material.parallaxScaleBias);
-                        this._effect.setMatrix("bumpMatrix", material.bumpTexture.getTextureMatrix());
-                        this._effect.setTexture("bumpSampler", material.bumpTexture);
-                        this._effect.setFloat2("vTangentSpaceParams", material.invertNormalMapX ? -1.0 : 1.0, material.invertNormalMapY ? -1.0 : 1.0);
+                    if (material.bumpTexture && scene.getEngine().getCaps().standardDerivatives && MaterialFlags.BumpTextureEnabled) {
+                        effect.setFloat3("vBumpInfos", material.bumpTexture.coordinatesIndex, 1.0 / material.bumpTexture.level, material.parallaxScaleBias);
+                        effect.setMatrix("bumpMatrix", material.bumpTexture.getTextureMatrix());
+                        effect.setTexture("bumpSampler", material.bumpTexture);
+                        effect.setFloat2("vTangentSpaceParams", material.invertNormalMapX ? -1.0 : 1.0, material.invertNormalMapY ? -1.0 : 1.0);
                     }
 
                     // Roughness
                     if (this._enableReflectivity) {
-                        if (material instanceof StandardMaterial && material.specularTexture) {
-                            this._effect.setMatrix("reflectivityMatrix", material.specularTexture.getTextureMatrix());
-                            this._effect.setTexture("reflectivitySampler", material.specularTexture);
-                        } else if (material instanceof PBRMaterial && material.reflectivityTexture) {
-                            this._effect.setMatrix("reflectivityMatrix", material.reflectivityTexture.getTextureMatrix());
-                            this._effect.setTexture("reflectivitySampler", material.reflectivityTexture);
+                        if (material.specularTexture) {
+                            effect.setMatrix("reflectivityMatrix", material.specularTexture.getTextureMatrix());
+                            effect.setTexture("reflectivitySampler", material.specularTexture);
+                        } else if (material.reflectivityTexture) {
+                            effect.setMatrix("reflectivityMatrix", material.reflectivityTexture.getTextureMatrix());
+                            effect.setTexture("reflectivitySampler", material.reflectivityTexture);
                         }
                     }
                 }
 
                 // Bones
                 if (renderingMesh.useBones && renderingMesh.computeBonesUsingShaders && renderingMesh.skeleton) {
-                    this._effect.setMatrices("mBones", renderingMesh.skeleton.getTransformMatrices(renderingMesh));
+                    effect.setMatrices("mBones", renderingMesh.skeleton.getTransformMatrices(renderingMesh));
                     if (this._enableVelocity) {
-                        this._effect.setMatrices("mPreviousBones", this._previousBonesTransformationMatrices[renderingMesh.uniqueId]);
+                        effect.setMatrices("mPreviousBones", this._previousBonesTransformationMatrices[renderingMesh.uniqueId]);
                     }
                 }
 
                 // Morph targets
-                MaterialHelper.BindMorphTargetParameters(renderingMesh, this._effect);
+                MaterialHelper.BindMorphTargetParameters(renderingMesh, effect);
+                if (renderingMesh.morphTargetManager && renderingMesh.morphTargetManager.isUsingTextureForTargets) {
+                    renderingMesh.morphTargetManager._bind(effect);
+                }
 
                 // Velocity
                 if (this._enableVelocity) {
-                    this._effect.setMatrix("previousWorld", this._previousTransformationMatrices[effectiveMesh.uniqueId].world);
-                    this._effect.setMatrix("previousViewProjection", this._previousTransformationMatrices[effectiveMesh.uniqueId].viewProjection);
+                    effect.setMatrix("previousWorld", this._previousTransformationMatrices[effectiveMesh.uniqueId].world);
+                    effect.setMatrix("previousViewProjection", this._previousTransformationMatrices[effectiveMesh.uniqueId].viewProjection);
+                    if (hardwareInstancedRendering && renderingMesh.hasThinInstances) {
+                        effect.setMatrix("world", world);
+                    }
                 }
 
                 // Draw
-                renderingMesh._processRendering(effectiveMesh, subMesh, this._effect, material.fillMode, batch, hardwareInstancedRendering,
-                    (isInstance, w) => this._effect.setMatrix("world", w));
+                renderingMesh._processRendering(effectiveMesh, subMesh, effect, material.fillMode, batch, hardwareInstancedRendering, (isInstance, w) => {
+                    if (!isInstance) {
+                        effect.setMatrix("world", w);
+                    }
+                });
             }
 
             // Velocity
@@ -504,6 +722,13 @@ export class GeometryBufferRenderer {
         this._multiRenderTarget.customRenderFunction = (opaqueSubMeshes: SmartArray<SubMesh>, alphaTestSubMeshes: SmartArray<SubMesh>, transparentSubMeshes: SmartArray<SubMesh>, depthOnlySubMeshes: SmartArray<SubMesh>): void => {
             var index;
 
+            if (this._linkedWithPrePass) {
+                if (!this._prePassRenderer.enabled) {
+                    return;
+                }
+                this._scene.getEngine().bindAttachments(this._attachments);
+            }
+
             if (depthOnlySubMeshes.length) {
                 engine.setColorWrite(false);
                 for (index = 0; index < depthOnlySubMeshes.length; index++) {
@@ -516,6 +741,7 @@ export class GeometryBufferRenderer {
                 renderSubMesh(opaqueSubMeshes.data[index]);
             }
 
+            engine.setDepthWrite(false);
             for (index = 0; index < alphaTestSubMeshes.length; index++) {
                 renderSubMesh(alphaTestSubMeshes.data[index]);
             }
@@ -525,6 +751,7 @@ export class GeometryBufferRenderer {
                     renderSubMesh(transparentSubMeshes.data[index]);
                 }
             }
+            engine.setDepthWrite(true);
         };
     }
 

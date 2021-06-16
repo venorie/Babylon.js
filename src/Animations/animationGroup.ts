@@ -8,6 +8,7 @@ import { Nullable } from "../types";
 import { EngineStore } from "../Engines/engineStore";
 
 import "./animatable";
+import { AbstractScene } from "../abstractScene";
 
 /**
  * This class defines the direct association between an animation and a target
@@ -58,6 +59,9 @@ export class AnimationGroup implements IDisposable {
     private _speedRatio = 1;
     private _loopAnimation = false;
     private _isAdditive = false;
+
+    /** @hidden */
+    public _parentContainer: Nullable<AbstractScene> = null;
 
     /**
      * Gets or sets the unique id of the node
@@ -280,7 +284,7 @@ export class AnimationGroup implements IDisposable {
                 let newKey: IAnimationKey = {
                     frame: endFrame,
                     value: endKey.value,
-                    inTangent: endKey.outTangent,
+                    inTangent: endKey.inTangent,
                     outTangent: endKey.outTangent,
                     interpolation: endKey.interpolation
                 };
@@ -427,6 +431,9 @@ export class AnimationGroup implements IDisposable {
      */
     public reset(): AnimationGroup {
         if (!this._isStarted) {
+            this.play();
+            this.goToFrame(0);
+            this.stop();
             return this;
         }
 
@@ -531,10 +538,19 @@ export class AnimationGroup implements IDisposable {
         this._targetedAnimations = [];
         this._animatables = [];
 
+        // Remove from scene
         var index = this._scene.animationGroups.indexOf(this);
 
         if (index > -1) {
             this._scene.animationGroups.splice(index, 1);
+        }
+
+        if (this._parentContainer) {
+            const index = this._parentContainer.animationGroups.indexOf(this);
+            if (index > -1) {
+                this._parentContainer.animationGroups.splice(index, 1);
+            }
+            this._parentContainer = null;
         }
 
         this.onAnimationEndObservable.clear();
@@ -563,7 +579,7 @@ export class AnimationGroup implements IDisposable {
      * Clone the current animation group and returns a copy
      * @param newName defines the name of the new group
      * @param targetConverter defines an optional function used to convert current animation targets to new ones
-     * @returns the new aniamtion group
+     * @returns the new animation group
      */
     public clone(newName: string, targetConverter?: (oldTarget: any) => any): AnimationGroup {
         let newGroup = new AnimationGroup(newName || this.name, this._scene);
@@ -614,7 +630,7 @@ export class AnimationGroup implements IDisposable {
                 }
             }
             else {
-                var targetNode = scene.getNodeByID(id);
+                var targetNode = scene.getNodeById(id);
 
                 if (targetNode != null) {
                     animationGroup.addTargetedAnimation(animation, targetNode);
@@ -664,7 +680,7 @@ export class AnimationGroup implements IDisposable {
     }
 
     /**
-     * Creates a detailled string about the object
+     * Creates a detailed string about the object
      * @param fullDetails defines if the output string will support multiple levels of logging within scene loading
      * @returns a string representing the object
      */

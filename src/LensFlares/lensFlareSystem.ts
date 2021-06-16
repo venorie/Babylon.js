@@ -5,9 +5,8 @@ import { Matrix, Vector3 } from "../Maths/math.vector";
 import { Scalar } from "../Maths/math.scalar";
 import { EngineStore } from "../Engines/engineStore";
 import { AbstractMesh } from "../Meshes/abstractMesh";
-import { VertexBuffer } from "../Meshes/buffer";
+import { VertexBuffer } from "../Buffers/buffer";
 import { Ray } from "../Culling/ray";
-import { Effect } from "../Materials/effect";
 import { Material } from "../Materials/material";
 import { LensFlare } from "./lensFlare";
 import { Constants } from "../Engines/constants";
@@ -15,9 +14,10 @@ import { Constants } from "../Engines/constants";
 import "../Shaders/lensFlare.fragment";
 import "../Shaders/lensFlare.vertex";
 import { _DevTools } from '../Misc/devTools';
-import { DataBuffer } from '../Meshes/dataBuffer';
+import { DataBuffer } from '../Buffers/dataBuffer';
 import { Color3 } from '../Maths/math.color';
 import { Viewport } from '../Maths/math.viewport';
+import { DrawWrapper } from "../Materials/drawWrapper";
 
 /**
  * This represents a Lens Flare System or the shiny effect created by the light reflection on the  camera lenses.
@@ -60,7 +60,7 @@ export class LensFlareSystem {
     private _emitter: any;
     private _vertexBuffers: { [key: string]: Nullable<VertexBuffer> } = {};
     private _indexBuffer: Nullable<DataBuffer>;
-    private _effect: Effect;
+    private _drawWrapper: DrawWrapper;
     private _positionX: number;
     private _positionY: number;
     private _isEnabled = true;
@@ -98,6 +98,8 @@ export class LensFlareSystem {
 
         var engine = scene.getEngine();
 
+        this._drawWrapper = new DrawWrapper(engine);
+
         // VBO
         var vertices = [];
         vertices.push(1, 1);
@@ -108,6 +110,16 @@ export class LensFlareSystem {
         this._vertexBuffers[VertexBuffer.PositionKind] = new VertexBuffer(engine, vertices, VertexBuffer.PositionKind, false, false, 2);
 
         // Indices
+        this._createIndexBuffer();
+
+        // Effects
+        this._drawWrapper.effect = engine.createEffect("lensFlare",
+            [VertexBuffer.PositionKind],
+            ["color", "viewportMatrix"],
+            ["textureSampler"], "");
+    }
+
+    private _createIndexBuffer(): void {
         var indices = [];
         indices.push(0);
         indices.push(1);
@@ -117,13 +129,7 @@ export class LensFlareSystem {
         indices.push(2);
         indices.push(3);
 
-        this._indexBuffer = engine.createIndexBuffer(indices);
-
-        // Effects
-        this._effect = engine.createEffect("lensFlare",
-            [VertexBuffer.PositionKind],
-            ["color", "viewportMatrix"],
-            ["textureSampler"], "");
+        this._indexBuffer = this._scene.getEngine().createIndexBuffer(indices);
     }
 
     /**
@@ -196,7 +202,10 @@ export class LensFlareSystem {
             this._positionY += this.viewportBorder;
         }
 
-        if (position.z > 0) {
+        const rhs = this._scene.useRightHandedSystem;
+        const okZ = position.z > 0 && !rhs || position.z < 0 && rhs;
+
+        if (okZ) {
             if ((this._positionX > globalViewport.x) && (this._positionX < globalViewport.x + globalViewport.width)) {
                 if ((this._positionY > globalViewport.y) && (this._positionY < globalViewport.y + globalViewport.height)) {
                     return true;
@@ -229,7 +238,7 @@ export class LensFlareSystem {
      * @hidden
      */
     public render(): boolean {
-        if (!this._effect.isReady() || !this._scene.activeCamera) {
+        if (!this._drawWrapper.effect!.isReady() || !this._scene.activeCamera) {
             return false;
         }
 
@@ -300,12 +309,12 @@ export class LensFlareSystem {
         var distY = centerY - this._positionY;
 
         // Effects
-        engine.enableEffect(this._effect);
+        engine.enableEffect(this._drawWrapper);
         engine.setState(false);
         engine.setDepthBuffer(false);
 
         // VBOs
-        engine.bindBuffers(this._vertexBuffers, this._indexBuffer, this._effect);
+        engine.bindBuffers(this._vertexBuffers, this._indexBuffer, this._drawWrapper.effect!);
 
         // Flares
         for (var index = 0; index < this.lensFlares.length; index++) {
@@ -331,13 +340,13 @@ export class LensFlareSystem {
                 0, 0, 1, 0,
                 cx, cy, 0, 1);
 
-            this._effect.setMatrix("viewportMatrix", viewportMatrix);
+            this._drawWrapper.effect!.setMatrix("viewportMatrix", viewportMatrix);
 
             // Texture
-            this._effect.setTexture("textureSampler", flare.texture);
+            this._drawWrapper.effect!.setTexture("textureSampler", flare.texture);
 
             // Color
-            this._effect.setFloat4("color", flare.color.r * intensity, flare.color.g * intensity, flare.color.b * intensity, 1.0);
+            this._drawWrapper.effect!.setFloat4("color", flare.color.r * intensity, flare.color.g * intensity, flare.color.b * intensity, 1.0);
 
             // Draw order
             engine.drawElementsType(Material.TriangleFillMode, 0, 6);
@@ -346,6 +355,17 @@ export class LensFlareSystem {
         engine.setDepthBuffer(true);
         engine.setAlphaMode(Constants.ALPHA_DISABLE);
         return true;
+    }
+
+    /**
+     * Rebuilds the lens flare system
+     */
+     public rebuild(): void {
+        this._createIndexBuffer();
+
+        for (const key in this._vertexBuffers) {
+            this._vertexBuffers[key]?._rebuild();
+        }
     }
 
     /**
@@ -373,14 +393,14 @@ export class LensFlareSystem {
     }
 
     /**
-     * Parse a lens flare system from a JSON repressentation
+     * Parse a lens flare system from a JSON representation
      * @param parsedLensFlareSystem Define the JSON to parse
      * @param scene Define the scene the parsed system should be instantiated in
      * @param rootUrl Define the rootUrl of the load sequence to easily find a load relative dependencies such as textures
      * @returns the parsed system
      */
     public static Parse(parsedLensFlareSystem: any, scene: Scene, rootUrl: string): LensFlareSystem {
-        var emitter = scene.getLastEntryByID(parsedLensFlareSystem.emitterId);
+        var emitter = scene.getLastEntryById(parsedLensFlareSystem.emitterId);
 
         var name = parsedLensFlareSystem.name || "lensFlareSystem#" + parsedLensFlareSystem.emitterId;
 

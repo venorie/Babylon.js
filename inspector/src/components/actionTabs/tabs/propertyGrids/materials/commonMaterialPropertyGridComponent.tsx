@@ -7,17 +7,19 @@ import { Constants } from "babylonjs/Engines/constants";
 import { Engine } from "babylonjs/Engines/engine";
 
 import { PropertyChangedEvent } from "../../../../propertyChangedEvent";
-import { CheckBoxLineComponent } from "../../../lines/checkBoxLineComponent";
-import { SliderLineComponent } from "../../../lines/sliderLineComponent";
-import { LineContainerComponent } from "../../../lineContainerComponent";
-import { TextLineComponent } from "../../../lines/textLineComponent";
-import { OptionsLineComponent, Null_Value } from "../../../lines/optionsLineComponent";
-import { LockObject } from "../lockObject";
+import { CheckBoxLineComponent } from "../../../../../sharedUiComponents/lines/checkBoxLineComponent";
+import { SliderLineComponent } from "../../../../../sharedUiComponents/lines/sliderLineComponent";
+import { LineContainerComponent } from "../../../../../sharedUiComponents/lines/lineContainerComponent";
+import { TextLineComponent } from "../../../../../sharedUiComponents/lines/textLineComponent";
+import { OptionsLineComponent, Null_Value } from "../../../../../sharedUiComponents/lines/optionsLineComponent";
+import { LockObject } from "../../../../../sharedUiComponents/tabs/propertyGrids/lockObject";
 import { GlobalState } from '../../../../globalState';
 import { CustomPropertyGridComponent } from '../customPropertyGridComponent';
-import { ButtonLineComponent } from '../../../lines/buttonLineComponent';
-import { TextInputLineComponent } from '../../../lines/textInputLineComponent';
+import { ButtonLineComponent } from '../../../../../sharedUiComponents/lines/buttonLineComponent';
+import { TextInputLineComponent } from '../../../../../sharedUiComponents/lines/textInputLineComponent';
 import { AnimationGridComponent } from '../animations/animationPropertyGridComponent';
+import { HexLineComponent } from "../../../../../sharedUiComponents/lines/hexLineComponent";
+import { FloatLineComponent } from "../../../../../sharedUiComponents/lines/floatLineComponent";
 
 interface ICommonMaterialPropertyGridComponentProps {
     globalState: GlobalState;
@@ -71,12 +73,34 @@ export class CommonMaterialPropertyGridComponent extends React.Component<ICommon
             { label: "Not equal", value: Engine.NOTEQUAL },
         ];
 
+        var stencilFunctionOptions = [
+            { label: "Never", value: Constants.NEVER },
+            { label: "Always", value: Constants.ALWAYS },
+            { label: "Equal", value: Constants.EQUAL },
+            { label: "Less", value: Constants.LESS },
+            { label: "Less or equal", value: Constants.LEQUAL },
+            { label: "Greater", value: Constants.GREATER },
+            { label: "Greater or equal", value: Constants.GEQUAL },
+            { label: "Not equal", value: Constants.NOTEQUAL },
+        ];
+
+        var stencilOperationOptions = [
+            { label: "Keep", value: Constants.KEEP },
+            { label: "Zero", value: Constants.ZERO },
+            { label: "Replace", value: Constants.REPLACE },
+            { label: "Incr", value: Constants.INCR },
+            { label: "Decr", value: Constants.DECR },
+            { label: "Invert", value: Constants.INVERT },
+            { label: "Incr wrap", value: Constants.INCR_WRAP },
+            { label: "Decr wrap", value: Constants.DECR_WRAP },
+        ];
+
         return (
             <div>
                 <CustomPropertyGridComponent globalState={this.props.globalState} target={material}
                     lockObject={this.props.lockObject}
                     onPropertyChangedObservable={this.props.onPropertyChangedObservable} />
-                <LineContainerComponent globalState={this.props.globalState} title="GENERAL">
+                <LineContainerComponent title="GENERAL" selection={this.props.globalState}>
                     <TextLineComponent label="ID" value={material.id} />
                     <TextInputLineComponent lockObject={this.props.lockObject} label="Name" target={material} propertyName="name" onPropertyChangedObservable={this.props.onPropertyChangedObservable}/>
                     <TextLineComponent label="Unique ID" value={material.uniqueId.toString()} />
@@ -97,7 +121,7 @@ export class CommonMaterialPropertyGridComponent extends React.Component<ICommon
                         this.props.globalState.onSelectionChangedObservable.notifyObservers(null);
                     }} />
                 </LineContainerComponent>
-                <LineContainerComponent globalState={this.props.globalState} title="TRANSPARENCY">
+                <LineContainerComponent title="TRANSPARENCY" selection={this.props.globalState}>
                     <SliderLineComponent label="Alpha" target={material} propertyName="alpha" minimum={0} maximum={1} step={0.01} onPropertyChangedObservable={this.props.onPropertyChangedObservable} />
                     {
                         (material as any).transparencyMode !== undefined &&
@@ -122,6 +146,18 @@ export class CommonMaterialPropertyGridComponent extends React.Component<ICommon
                     }
                     <CheckBoxLineComponent label="Separate culling pass" target={material} propertyName="separateCullingPass" onPropertyChangedObservable={this.props.onPropertyChangedObservable} />
                 </LineContainerComponent>
+                { material.stencil && <>
+                    <LineContainerComponent title="STENCIL" selection={this.props.globalState}>
+                        <CheckBoxLineComponent label="Enabled" target={material.stencil} propertyName="enabled" onPropertyChangedObservable={this.props.onPropertyChangedObservable} />
+                        <HexLineComponent isInteger lockObject={this.props.lockObject} label="Mask" target={material.stencil} propertyName="mask" onPropertyChangedObservable={this.props.onPropertyChangedObservable} />
+                        <OptionsLineComponent label="Function" options={stencilFunctionOptions} target={material.stencil} propertyName="func" onPropertyChangedObservable={this.props.onPropertyChangedObservable} onSelect={(value) => this.setState({ stencilFunction: value })} />
+                        <FloatLineComponent isInteger lockObject={this.props.lockObject} label="Function reference" target={material.stencil} propertyName="funcRef" onPropertyChangedObservable={this.props.onPropertyChangedObservable} />
+                        <HexLineComponent isInteger lockObject={this.props.lockObject} label="Function mask" target={material.stencil} propertyName="funcMask" onPropertyChangedObservable={this.props.onPropertyChangedObservable} />
+                        <OptionsLineComponent label="Op stencil fail" options={stencilOperationOptions} target={material.stencil} propertyName="opStencilFail" onPropertyChangedObservable={this.props.onPropertyChangedObservable} onSelect={(value) => this.setState({ opStencilFail: value })} />
+                        <OptionsLineComponent label="Op depth fail" options={stencilOperationOptions} target={material.stencil} propertyName="opDepthFail" onPropertyChangedObservable={this.props.onPropertyChangedObservable} onSelect={(value) => this.setState({ opDepthFail: value })} />
+                        <OptionsLineComponent label="Op stencil+depth pass" options={stencilOperationOptions} target={material.stencil} propertyName="opStencilDepthPass" onPropertyChangedObservable={this.props.onPropertyChangedObservable} onSelect={(value) => this.setState({ opStencilDepthPass: value })} />
+                    </LineContainerComponent>
+                </> }
                 <AnimationGridComponent globalState={this.props.globalState} animatable={material} scene={material.getScene()} lockObject={this.props.lockObject} />
             </div>
         );

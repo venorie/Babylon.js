@@ -95,6 +95,13 @@ export class CubeTexture extends BaseTexture {
     @serialize("forcedExtension")
     protected _forcedExtension: Nullable<string> = null;
 
+    /**
+     * Gets the forced extension (if any)
+     */
+    public get forcedExtension(): Nullable<string> {
+        return this._forcedExtension;
+    }
+
     @serialize("extensions")
     private _extensions: Nullable<string[]> = null;
 
@@ -103,6 +110,8 @@ export class CubeTexture extends BaseTexture {
 
     private _format: number;
     private _createPolynomials: boolean;
+    private _loaderOptions: any;
+    private _useSRGBBuffer?: boolean;
 
     /**
      * Creates a cube texture from an array of image urls
@@ -146,7 +155,7 @@ export class CubeTexture extends BaseTexture {
      * @param extensions defines the suffixes add to the picture name in case six images are in use like _px.jpg...
      * @param noMipmap defines if mipmaps should be created or not
      * @param files defines the six files to load for the different faces in that order: px, py, pz, nx, ny, nz
-     * @param onLoad defines a callback triggered at the end of the file load if no errors occured
+     * @param onLoad defines a callback triggered at the end of the file load if no errors occurred
      * @param onError defines a callback triggered in case of error during load
      * @param format defines the internal format to use for the texture once loaded
      * @param prefiltered defines whether or not the texture is created from prefiltered data
@@ -154,12 +163,14 @@ export class CubeTexture extends BaseTexture {
      * @param createPolynomials defines whether or not to create polynomial harmonics from the texture data if necessary
      * @param lodScale defines the scale applied to environment texture. This manages the range of LOD level used for IBL according to the roughness
      * @param lodOffset defines the offset applied to environment texture. This manages first LOD level used for IBL according to the roughness
-     * @return the cube texture
+     * @param loaderOptions options to be passed to the loader
+     * @param useSRGBBuffer Defines if the texture must be loaded in a sRGB GPU buffer (if supported by the GPU) (default: false)
+    * @return the cube texture
      */
     constructor(rootUrl: string, sceneOrEngine: Scene | ThinEngine, extensions: Nullable<string[]> = null, noMipmap: boolean = false, files: Nullable<string[]> = null,
         onLoad: Nullable<() => void> = null, onError: Nullable<(message?: string, exception?: any) => void> = null, format: number = Constants.TEXTUREFORMAT_RGBA, prefiltered = false,
         forcedExtension: any = null, createPolynomials: boolean = false,
-        lodScale: number = 0.8, lodOffset: number = 0) {
+        lodScale: number = 0.8, lodOffset: number = 0, loaderOptions?: any, useSRGBBuffer?: boolean) {
         super(sceneOrEngine);
 
         this.name = rootUrl;
@@ -174,6 +185,8 @@ export class CubeTexture extends BaseTexture {
         this._extensions = extensions;
         this._files = files;
         this._forcedExtension = forcedExtension;
+        this._loaderOptions = loaderOptions;
+        this._useSRGBBuffer = useSRGBBuffer;
 
         if (!rootUrl && !files) {
             return;
@@ -181,8 +194,8 @@ export class CubeTexture extends BaseTexture {
 
         const lastDot = rootUrl.lastIndexOf(".");
         const extension = forcedExtension ? forcedExtension : (lastDot > -1 ? rootUrl.substring(lastDot).toLowerCase() : "");
-        const isDDS = (extension === ".dds");
-        const isEnv = (extension === ".env");
+        const isDDS = (extension.indexOf(".dds") === 0);
+        const isEnv = (extension.indexOf(".env") === 0);
 
         if (isEnv) {
             this.gammaSpace = false;
@@ -198,7 +211,7 @@ export class CubeTexture extends BaseTexture {
             }
         }
 
-        this._texture = this._getFromCache(rootUrl, noMipmap);
+        this._texture = this._getFromCache(rootUrl, noMipmap, undefined, undefined, useSRGBBuffer);
 
         if (!files) {
             if (!isEnv && !isDDS && !extensions) {
@@ -231,7 +244,7 @@ export class CubeTexture extends BaseTexture {
                     this._texture = this._getEngine()!.createPrefilteredCubeTexture(rootUrl, scene, lodScale, lodOffset, onLoad, onError, format, forcedExtension, this._createPolynomials);
                 }
                 else {
-                    this._texture = this._getEngine()!.createCubeTexture(rootUrl, scene, files, noMipmap, onLoad, onError, this._format, forcedExtension, false, lodScale, lodOffset);
+                    this._texture = this._getEngine()!.createCubeTexture(rootUrl, scene, files, noMipmap, onLoad, onError, this._format, forcedExtension, false, lodScale, lodOffset, null, loaderOptions, !!this._useSRGBBuffer);
                 }
                 this._texture?.onLoadedObservable.add(() => this.onLoadObservable.notifyObservers(this));
 
@@ -297,15 +310,15 @@ export class CubeTexture extends BaseTexture {
         }
 
         this.delayLoadState = Constants.DELAYLOADSTATE_LOADED;
-        this._texture = this._getFromCache(this.url, this._noMipmap);
+        this._texture = this._getFromCache(this.url, this._noMipmap, undefined, undefined, this._useSRGBBuffer);
 
         if (!this._texture) {
             const scene = this.getScene();
             if (this._prefiltered) {
-                this._texture = this._getEngine()!.createPrefilteredCubeTexture(this.url, scene, 0.8, 0, this._delayedOnLoad, undefined, this._format, undefined, this._createPolynomials);
+                this._texture = this._getEngine()!.createPrefilteredCubeTexture(this.url, scene, 0.8, 0, this._delayedOnLoad, undefined, this._format, forcedExtension, this._createPolynomials);
             }
             else {
-                this._texture = this._getEngine()!.createCubeTexture(this.url, scene, this._files, this._noMipmap, this._delayedOnLoad, null, this._format, forcedExtension);
+                this._texture = this._getEngine()!.createCubeTexture(this.url, scene, this._files, this._noMipmap, this._delayedOnLoad, null, this._format, forcedExtension, false, 0, 0, null, this._loaderOptions, !!this._useSRGBBuffer);
             }
 
             this._texture?.onLoadedObservable.add(() => this.onLoadObservable.notifyObservers(this));

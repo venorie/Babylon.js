@@ -4,11 +4,12 @@ import { Nullable } from "../types";
 import { IDisposable, Scene } from "../scene";
 import { InternalTexture, InternalTextureSource } from "../Materials/Textures/internalTexture";
 import { RenderTargetTexture } from "../Materials/Textures/renderTargetTexture";
-import { WebXRRenderTarget } from './webXRTypes';
-import { WebXRManagedOutputCanvas, WebXRManagedOutputCanvasOptions } from './webXRManagedOutputCanvas';
+import { WebXRRenderTarget } from "./webXRTypes";
+import { WebXRManagedOutputCanvas, WebXRManagedOutputCanvasOptions } from "./webXRManagedOutputCanvas";
+import { Engine } from "../Engines/engine";
 
 interface IRenderTargetProvider {
-    getRenderTargetForEye(eye: XREye): RenderTargetTexture;
+    getRenderTargetForEye(eye: XREye): Nullable<RenderTargetTexture>;
 }
 
 /**
@@ -16,11 +17,13 @@ interface IRenderTargetProvider {
  * @see https://doc.babylonjs.com/how_to/webxr_session_manager
  */
 export class WebXRSessionManager implements IDisposable {
+    private _engine: Nullable<Engine>;
     private _referenceSpace: XRReferenceSpace;
     private _rttProvider: Nullable<IRenderTargetProvider>;
     private _sessionEnded: boolean = false;
     private _xrNavigator: any;
-    private baseLayer: Nullable<XRWebGLLayer> = null;
+    private _baseLayer: Nullable<XRWebGLLayer> = null;
+    private _renderTargetTextures: Array<RenderTargetTexture> = [];
 
     /**
      * The base reference space from which the session started. good if you want to reset your
@@ -51,7 +54,7 @@ export class WebXRSessionManager implements IDisposable {
      */
     public onXRSessionEnded: Observable<any> = new Observable<any>();
     /**
-     * Fires when the xr session is ended either by the device or manually done
+     * Fires when the xr session is initialized: right after requestSession was called and returned with a successful result
      */
     public onXRSessionInit: Observable<XRSession> = new Observable<XRSession>();
     /**
@@ -72,6 +75,10 @@ export class WebXRSessionManager implements IDisposable {
         /** The scene which the session should be created for */
         public scene: Scene
     ) {
+        this._engine = scene.getEngine();
+        this._engine.onDisposeObservable.addOnce(() => {
+            this._engine = null;
+        });
     }
 
     /**
@@ -92,6 +99,7 @@ export class WebXRSessionManager implements IDisposable {
 
     /**
      * Disposes of the session manager
+     * This should be called explicitly by the dev, if required.
      */
     public dispose() {
         // disposing without leaving XR? Exit XR first
@@ -110,8 +118,9 @@ export class WebXRSessionManager implements IDisposable {
      */
     public exitXRAsync() {
         if (this.session && !this._sessionEnded) {
+            this._sessionEnded = true;
             return this.session.end().catch((e) => {
-                Logger.Warn("could not end XR session. It has ended already.");
+                Logger.Warn("Could not end XR session.");
             });
         }
         return Promise.resolve();
@@ -120,9 +129,9 @@ export class WebXRSessionManager implements IDisposable {
     /**
      * Gets the correct render target texture to be rendered this frame for this eye
      * @param eye the eye for which to get the render target
-     * @returns the render target for the specified eye
+     * @returns the render target for the specified eye or null if not available
      */
-    public getRenderTargetTextureForEye(eye: XREye): RenderTargetTexture {
+    public getRenderTargetTextureForEye(eye: XREye): Nullable<RenderTargetTexture> {
         return this._rttProvider!.getRenderTargetForEye(eye);
     }
 
@@ -136,10 +145,9 @@ export class WebXRSessionManager implements IDisposable {
         const engine = this.scene.getEngine();
         if (this._xrNavigator.xr.native) {
             return this._xrNavigator.xr.getWebXRRenderTarget(engine);
-        }
-        else {
-            options = options || {};
-            options.canvasElement = engine.getRenderingCanvas() || undefined;
+        } else {
+            options = options || WebXRManagedOutputCanvasOptions.GetDefaults(engine);
+            options.canvasElement = options.canvasElement || engine.getRenderingCanvas() || undefined;
             return new WebXRManagedOutputCanvas(this, options);
         }
     }
@@ -164,29 +172,44 @@ export class WebXRSessionManager implements IDisposable {
      * @param xrSessionInit defines optional and required values to pass to the session builder
      * @returns a promise which will resolve once the session has been initialized
      */
-    public initializeSessionAsync(xrSessionMode: XRSessionMode = 'immersive-vr', xrSessionInit: XRSessionInit = {}): Promise<XRSession> {
+    public initializeSessionAsync(xrSessionMode: XRSessionMode = "immersive-vr", xrSessionInit: XRSessionInit = {}): Promise<XRSession> {
         return this._xrNavigator.xr.requestSession(xrSessionMode, xrSessionInit).then((session: XRSession) => {
             this.session = session;
             this.onXRSessionInit.notifyObservers(session);
             this._sessionEnded = false;
 
             // handle when the session is ended (By calling session.end or device ends its own session eg. pressing home button on phone)
-            this.session.addEventListener("end", () => {
-                const engine = this.scene.getEngine();
-                this._sessionEnded = true;
-                // Remove render target texture and notify frame observers
-                this._rttProvider = null;
-                // make sure dimensions object is restored
-                engine.framebufferDimensionsObject = null;
+            this.session.addEventListener(
+                "end",
+                () => {
+                    this._sessionEnded = true;
 
-                // Restore frame buffer to avoid clear on xr framebuffer after session end
-                engine.restoreDefaultFramebuffer();
+                    // Notify frame observers
+                    this.onXRSessionEnded.notifyObservers(null);
+                    // Remove render target texture
+                    this._rttProvider = null;
 
-                // Need to restart render loop as after the session is ended the last request for new frame will never call callback
-                engine.customAnimationFrameRequester = null;
-                this.onXRSessionEnded.notifyObservers(null);
-                engine._renderLoop();
-            }, { once: true });
+                    if (this._engine) {
+                        // make sure dimensions object is restored
+                        this._engine.framebufferDimensionsObject = null;
+
+                        // Restore frame buffer to avoid clear on xr framebuffer after session end
+                        this._engine.restoreDefaultFramebuffer();
+
+                        // Need to restart render loop as after the session is ended the last request for new frame will never call callback
+                        this._engine.customAnimationFrameRequester = null;
+                        this._engine._renderLoop();
+                    }
+
+                    // Dispose render target textures
+                    if (this.isNative) {
+                        this._renderTargetTextures.forEach((rtt) => rtt.dispose());
+                        this._renderTargetTextures.length = 0;
+                    }
+                },
+                { once: true }
+            );
+
             return this.session;
         });
     }
@@ -211,38 +234,54 @@ export class WebXRSessionManager implements IDisposable {
      * Starts rendering to the xr layer
      */
     public runXRRenderLoop() {
-        const engine = this.scene.getEngine();
+        if (this._sessionEnded || !this._engine) {
+            return;
+        }
+
         // Tell the engine's render loop to be driven by the xr session's refresh rate and provide xr pose information
-        engine.customAnimationFrameRequester = {
+        this._engine.customAnimationFrameRequester = {
             requestAnimationFrame: this.session.requestAnimationFrame.bind(this.session),
             renderFunction: (timestamp: number, xrFrame: Nullable<XRFrame>) => {
-                if (this._sessionEnded) {
+                if (this._sessionEnded || !this._engine) {
                     return;
                 }
                 // Store the XR frame and timestamp in the session manager
                 this.currentFrame = xrFrame;
                 this.currentTimestamp = timestamp;
                 if (xrFrame) {
-                    engine.framebufferDimensionsObject = this.baseLayer!;
+                    this._engine.framebufferDimensionsObject = this._baseLayer!;
                     this.onXRFrameObservable.notifyObservers(xrFrame);
-                    engine._renderLoop();
-                    engine.framebufferDimensionsObject = null;
+                    this._engine._renderLoop();
+                    this._engine.framebufferDimensionsObject = null;
                 }
-            }
+            },
         };
 
         if (this._xrNavigator.xr.native) {
-            this._rttProvider = this._xrNavigator.xr.getNativeRenderTargetProvider(this.session, this._createRenderTargetTexture.bind(this));
+            this._rttProvider = this._xrNavigator.xr.getNativeRenderTargetProvider(this.session, this._createRenderTargetTexture.bind(this), this._destroyRenderTargetTexture.bind(this));
         } else {
             // Create render target texture from xr's webgl render target
-            const rtt = this._createRenderTargetTexture(this.baseLayer!.framebufferWidth, this.baseLayer!.framebufferHeight, this.baseLayer!.framebuffer);
-            this._rttProvider = { getRenderTargetForEye: () => rtt };
-            engine.framebufferDimensionsObject = this.baseLayer;
+            let rtt: RenderTargetTexture, framebufferWidth: number, framebufferHeight: number, framebuffer: WebGLFramebuffer;
+            this._rttProvider = {
+                getRenderTargetForEye: () => {
+                    const baseLayer = this._baseLayer!;
+                    if (baseLayer.framebufferWidth !== framebufferWidth || baseLayer.framebufferHeight !== framebufferHeight || baseLayer.framebuffer !== framebuffer) {
+                        rtt = this._createRenderTargetTexture(baseLayer.framebufferWidth, baseLayer.framebufferHeight, baseLayer.framebuffer);
+                        framebufferWidth = baseLayer.framebufferWidth;
+                        framebufferHeight = baseLayer.framebufferHeight;
+                        framebuffer = baseLayer.framebuffer;
+                    }
+                    return rtt;
+                },
+            };
+            this._engine.framebufferDimensionsObject = this._baseLayer;
         }
 
         // Stop window's animation frame and trigger sessions animation frame
-        if (window.cancelAnimationFrame) { window.cancelAnimationFrame(engine._frameHandler); }
-        engine._renderLoop();
+        if (typeof window !== "undefined" && window.cancelAnimationFrame) {
+            window.cancelAnimationFrame(this._engine._frameHandler);
+        }
+        this._engine._renderLoop();
     }
 
     /**
@@ -251,31 +290,41 @@ export class WebXRSessionManager implements IDisposable {
      * @returns a promise that will resolve once the reference space has been set
      */
     public setReferenceSpaceTypeAsync(referenceSpaceType: XRReferenceSpaceType = "local-floor"): Promise<XRReferenceSpace> {
-        return this.session.requestReferenceSpace(referenceSpaceType).then((referenceSpace: XRReferenceSpace) => {
-            return referenceSpace;
-        }, (rejectionReason) => {
-            Logger.Error("XR.requestReferenceSpace failed for the following reason: ");
-            Logger.Error(rejectionReason);
-            Logger.Log("Defaulting to universally-supported \"viewer\" reference space type.");
+        return this.session
+            .requestReferenceSpace(referenceSpaceType)
+            .then(
+                (referenceSpace) => {
+                    return referenceSpace as XRReferenceSpace;
+                },
+                (rejectionReason) => {
+                    Logger.Error("XR.requestReferenceSpace failed for the following reason: ");
+                    Logger.Error(rejectionReason);
+                    Logger.Log('Defaulting to universally-supported "viewer" reference space type.');
 
-            return this.session.requestReferenceSpace("viewer").then((referenceSpace: XRReferenceSpace) => {
-                const heightCompensation = new XRRigidTransform({ x: 0, y: -this.defaultHeightCompensation, z: 0 });
-                return referenceSpace.getOffsetReferenceSpace(heightCompensation);
-            }, (rejectionReason) => {
-                Logger.Error(rejectionReason);
-                throw "XR initialization failed: required \"viewer\" reference space type not supported.";
+                    return this.session.requestReferenceSpace("viewer").then(
+                        (referenceSpace) => {
+                            const heightCompensation = new XRRigidTransform({ x: 0, y: -this.defaultHeightCompensation, z: 0 });
+                            return (referenceSpace as XRReferenceSpace).getOffsetReferenceSpace(heightCompensation);
+                        },
+                        (rejectionReason) => {
+                            Logger.Error(rejectionReason);
+                            throw 'XR initialization failed: required "viewer" reference space type not supported.';
+                        }
+                    );
+                }
+            )
+            .then((referenceSpace) => {
+                // create viewer reference space before setting the first reference space
+                return this.session.requestReferenceSpace("viewer").then((viewerReferenceSpace) => {
+                    this.viewerReferenceSpace = viewerReferenceSpace as XRReferenceSpace;
+                    return referenceSpace;
+                });
+            })
+            .then((referenceSpace) => {
+                // initialize the base and offset (currently the same)
+                this.referenceSpace = this.baseReferenceSpace = referenceSpace;
+                return this.referenceSpace;
             });
-        }).then((referenceSpace) => {
-            // create viewer reference space before setting the first reference space
-            return this.session.requestReferenceSpace("viewer").then((viewerReferenceSpace: XRReferenceSpace) => {
-                this.viewerReferenceSpace = viewerReferenceSpace;
-                return referenceSpace;
-            });
-        }).then((referenceSpace) => {
-            // initialize the base and offset (currently the same)
-            this.referenceSpace = this.baseReferenceSpace = referenceSpace;
-            return this.referenceSpace;
-        });
     }
 
     /**
@@ -285,7 +334,7 @@ export class WebXRSessionManager implements IDisposable {
      */
     public updateRenderStateAsync(state: XRRenderState) {
         if (state.baseLayer) {
-            this.baseLayer = state.baseLayer;
+            this._baseLayer = state.baseLayer;
         }
         return this.session.updateRenderState(state);
     }
@@ -304,28 +353,50 @@ export class WebXRSessionManager implements IDisposable {
         if (!functionToUse) {
             return Promise.resolve(false);
         } else {
-            return functionToUse.call((navigator as any).xr, sessionMode).then((result: boolean) => {
-                const returnValue = (typeof result === "undefined") ? true : result;
-                return Promise.resolve(returnValue);
-            }).catch((e: any) => {
-                Logger.Warn(e);
-                return Promise.resolve(false);
-            });
+            return functionToUse
+                .call((navigator as any).xr, sessionMode)
+                .then((result: boolean) => {
+                    const returnValue = typeof result === "undefined" ? true : result;
+                    return Promise.resolve(returnValue);
+                })
+                .catch((e: any) => {
+                    Logger.Warn(e);
+                    return Promise.resolve(false);
+                });
         }
     }
 
-    private _createRenderTargetTexture(width: number, height: number, framebuffer: Nullable<WebGLFramebuffer> = null) {
+    /**
+     * Returns true if Babylon.js is using the BabylonNative backend, otherwise false
+     */
+    public get isNative(): boolean {
+        return this._xrNavigator.xr.native ?? false;
+    }
+
+    private _createRenderTargetTexture(width: number, height: number, framebuffer: WebGLFramebuffer): RenderTargetTexture {
+        if (!this._engine) {
+            throw new Error("Engine is disposed");
+        }
+
         // Create internal texture
-        var internalTexture = new InternalTexture(this.scene.getEngine(), InternalTextureSource.Unknown, true);
+        const internalTexture = new InternalTexture(this._engine, InternalTextureSource.Unknown, true);
         internalTexture.width = width;
         internalTexture.height = height;
         internalTexture._framebuffer = framebuffer;
 
         // Create render target texture from the internal texture
-        var renderTargetTexture = new RenderTargetTexture("XR renderTargetTexture", { width: width, height: height }, this.scene,
-            undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, true);
+        const renderTargetTexture = new RenderTargetTexture("XR renderTargetTexture", { width: width, height: height }, this.scene, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, true);
         renderTargetTexture._texture = internalTexture;
+        renderTargetTexture.disableRescaling();
+
+        // Store the render target texture for cleanup when the session ends.
+        this._renderTargetTextures.push(renderTargetTexture);
 
         return renderTargetTexture;
+    }
+
+    private _destroyRenderTargetTexture(renderTargetTexture: RenderTargetTexture): void {
+        this._renderTargetTextures.splice(this._renderTargetTextures.indexOf(renderTargetTexture), 1);
+        renderTargetTexture.dispose();
     }
 }

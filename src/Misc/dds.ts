@@ -337,7 +337,7 @@ export class DDSTools {
         return new Float32Array(arrayBuffer, dataOffset, dataLength);
     }
 
-    private static _GetFloatAsUIntRGBAArrayBuffer(width: number, height: number, dataOffset: number, dataLength: number, arrayBuffer: ArrayBuffer, lod: number): Float32Array {
+    private static _GetFloatAsUIntRGBAArrayBuffer(width: number, height: number, dataOffset: number, dataLength: number, arrayBuffer: ArrayBuffer, lod: number): Uint8Array {
         var destArray = new Uint8Array(dataLength);
         var srcData = new Float32Array(arrayBuffer, dataOffset);
         var index = 0;
@@ -359,7 +359,7 @@ export class DDSTools {
         return destArray;
     }
 
-    private static _GetHalfFloatAsUIntRGBAArrayBuffer(width: number, height: number, dataOffset: number, dataLength: number, arrayBuffer: ArrayBuffer, lod: number): Float32Array {
+    private static _GetHalfFloatAsUIntRGBAArrayBuffer(width: number, height: number, dataOffset: number, dataLength: number, arrayBuffer: ArrayBuffer, lod: number): Uint8Array {
         var destArray = new Uint8Array(dataLength);
         var srcData = new Uint16Array(arrayBuffer, dataOffset);
         var index = 0;
@@ -450,7 +450,10 @@ export class DDSTools {
         if (info.sphericalPolynomial) {
             sphericalPolynomialFaces = new Array<ArrayBufferView>();
         }
-        var ext = engine.getCaps().s3tc;
+        var ext = !!engine.getCaps().s3tc;
+
+        // TODO WEBGPU Once generateMipMaps is split into generateMipMaps + hasMipMaps in InternalTexture this line can be removed
+        texture.generateMipMaps = loadMipmaps;
 
         var header = new Int32Array(data.buffer, data.byteOffset, headerLengthInt);
         var fourCC: number, width: number, height: number, dataLength: number = 0, dataOffset: number;
@@ -483,15 +486,15 @@ export class DDSTools {
             switch (fourCC) {
                 case FOURCC_DXT1:
                     blockBytes = 8;
-                    internalCompressedFormat = (<WEBGL_compressed_texture_s3tc>ext).COMPRESSED_RGBA_S3TC_DXT1_EXT;
+                    internalCompressedFormat = Constants.TEXTUREFORMAT_COMPRESSED_RGBA_S3TC_DXT1;
                     break;
                 case FOURCC_DXT3:
                     blockBytes = 16;
-                    internalCompressedFormat = (<WEBGL_compressed_texture_s3tc>ext).COMPRESSED_RGBA_S3TC_DXT3_EXT;
+                    internalCompressedFormat = Constants.TEXTUREFORMAT_COMPRESSED_RGBA_S3TC_DXT3;
                     break;
                 case FOURCC_DXT5:
                     blockBytes = 16;
-                    internalCompressedFormat = (<WEBGL_compressed_texture_s3tc>ext).COMPRESSED_RGBA_S3TC_DXT5_EXT;
+                    internalCompressedFormat = Constants.TEXTUREFORMAT_COMPRESSED_RGBA_S3TC_DXT5;
                     break;
                 case FOURCC_D3DFMT_R16G16B16A16F:
                     computeFormats = true;
@@ -753,8 +756,11 @@ ThinEngine.prototype.createPrefilteredCubeTexture = function(rootUrl: string, sc
             glTextureFromLod.width = Math.pow(2, Math.max(Scalar.Log2(width) - mipmapIndex, 0));
             glTextureFromLod.height = glTextureFromLod.width;
             glTextureFromLod.isCube = true;
+            glTextureFromLod._cachedWrapU = Constants.TEXTURE_CLAMP_ADDRESSMODE;
+            glTextureFromLod._cachedWrapV = Constants.TEXTURE_CLAMP_ADDRESSMODE;
             this._bindTextureDirectly(gl.TEXTURE_CUBE_MAP, glTextureFromLod, true);
 
+            glTextureFromLod.samplingMode = Constants.TEXTURE_LINEAR_LINEAR;
             gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);

@@ -37,6 +37,10 @@ import { SpriteManager } from 'babylonjs/Sprites/spriteManager';
 import { SpriteTreeItemComponent } from './entities/spriteTreeItemComponent';
 import { Sprite } from 'babylonjs/Sprites/sprite';
 import { TargetedAnimationItemComponent } from './entities/targetedAnimationTreeItemComponent';
+import { Sound } from 'babylonjs/Audio/sound';
+import { SoundTreeItemComponent } from './entities/soundTreeItemComponent';
+import { EffectLayerItemComponent } from "./entities/effectLayerPipelineTreeItemComponent";
+import { EffectLayer } from "babylonjs/Layers/effectLayer";
 
 
 interface ITreeItemSpecializedComponentProps {
@@ -96,7 +100,7 @@ export class TreeItemSpecializedComponent extends React.Component<ITreeItemSpeci
             }
 
             if (className.indexOf("Camera") !== -1) {
-                return (<CameraTreeItemComponent extensibilityGroups={this.props.extensibilityGroups} camera={entity as Camera} onClick={() => this.onClick()} />);
+                return (<CameraTreeItemComponent globalState={this.props.globalState} extensibilityGroups={this.props.extensibilityGroups} camera={entity as Camera} onClick={() => this.onClick()} />);
             }
 
             if (className.indexOf("Light", className.length - 5) !== -1) {
@@ -133,6 +137,14 @@ export class TreeItemSpecializedComponent extends React.Component<ITreeItemSpeci
 
             if (className.indexOf("PostProcess") !== -1) {
                 return (<PostProcessItemComponent extensibilityGroups={this.props.extensibilityGroups} postProcess={entity as PostProcess} onClick={() => this.onClick()} />);
+            }
+
+            if (className.indexOf("Layer") !== -1) {
+                return (<EffectLayerItemComponent extensibilityGroups={this.props.extensibilityGroups} layer={entity as EffectLayer} onClick={() => this.onClick()} />);
+            }
+
+            if (className.indexOf("Sound") !== -1) {
+                return (<SoundTreeItemComponent extensibilityGroups={this.props.extensibilityGroups} sound={entity as Sound} onClick={() => this.onClick()} />);
             }
 
             if (entity._host) {

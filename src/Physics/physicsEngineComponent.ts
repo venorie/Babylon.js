@@ -29,7 +29,7 @@ declare module "../scene" {
         /**
          * Enables physics to the current scene
          * @param gravity defines the scene's gravity for the physics engine
-         * @param plugin defines the physics engine to be used. defaults to OimoJS.
+         * @param plugin defines the physics engine to be used. defaults to CannonJS.
          * @return a boolean indicating if the physics engine was initialized
          */
         enablePhysics(gravity: Nullable<Vector3>, plugin?: IPhysicsEnginePlugin): boolean;
@@ -74,7 +74,7 @@ Scene.prototype.getPhysicsEngine = function(): Nullable<IPhysicsEngine> {
 /**
  * Enables physics to the current scene
  * @param gravity defines the scene's gravity for the physics engine
- * @param plugin defines the physics engine to be used. defaults to OimoJS.
+ * @param plugin defines the physics engine to be used. defaults to CannonJS.
  * @return a boolean indicating if the physics engine was initialized
  */
 Scene.prototype.enablePhysics = function(gravity: Nullable<Vector3> = null, plugin?: IPhysicsEnginePlugin): boolean {
@@ -315,7 +315,7 @@ export class PhysicsEngineSceneComponent implements ISceneComponent {
     }
 
     /**
-     * Disposes the component and the associated ressources
+     * Disposes the component and the associated resources
      */
     public dispose(): void {
         this.scene.onBeforePhysicsObservable.clear();

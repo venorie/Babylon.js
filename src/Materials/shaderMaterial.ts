@@ -5,7 +5,7 @@ import { Matrix, Vector3, Vector2, Vector4 } from "../Maths/math.vector";
 import { AbstractMesh } from "../Meshes/abstractMesh";
 import { Mesh } from "../Meshes/mesh";
 import { SubMesh } from "../Meshes/subMesh";
-import { VertexBuffer } from "../Meshes/buffer";
+import { VertexBuffer } from "../Buffers/buffer";
 import { BaseTexture } from "../Materials/Textures/baseTexture";
 import { Texture } from "../Materials/Textures/texture";
 import { MaterialHelper } from "./materialHelper";
@@ -39,7 +39,7 @@ export interface IShaderMaterialOptions {
     attributes: string[];
 
     /**
-     * The list of unifrom names used in the shader
+     * The list of uniform names used in the shader
      */
     uniforms: string[];
 
@@ -57,6 +57,11 @@ export interface IShaderMaterialOptions {
      * The list of defines used in the shader
      */
     defines: string[];
+
+    /**
+     * Defines if clip planes have to be turned on: true to turn them on, false to turn them off and null to turn them on/off depending on the scene configuration (scene.clipPlaneX)
+     */
+    useClipPlane: Nullable<boolean>;
 }
 
 /**
@@ -82,9 +87,9 @@ export class ShaderMaterial extends Material {
     private _vectors3: { [name: string]: Vector3 } = {};
     private _vectors4: { [name: string]: Vector4 } = {};
     private _matrices: { [name: string]: Matrix } = {};
-    private _matrixArrays: { [name: string]: Float32Array } = {};
-    private _matrices3x3: { [name: string]: Float32Array } = {};
-    private _matrices2x2: { [name: string]: Float32Array } = {};
+    private _matrixArrays: { [name: string]: Float32Array | Array<number> } = {};
+    private _matrices3x3: { [name: string]: Float32Array | Array<number> } = {};
+    private _matrices2x2: { [name: string]: Float32Array | Array<number> } = {};
     private _vectors2Arrays: { [name: string]: number[] } = {};
     private _vectors3Arrays: { [name: string]: number[] } = {};
     private _vectors4Arrays: { [name: string]: number[] } = {};
@@ -126,6 +131,7 @@ export class ShaderMaterial extends Material {
             uniformBuffers: [],
             samplers: [],
             defines: [],
+            useClipPlane: false,
             ...options
         };
     }
@@ -393,7 +399,7 @@ export class ShaderMaterial extends Material {
      * @param value Define the value to give to the uniform
      * @return the material itself allowing "fluent" like uniform updates
      */
-    public setMatrix3x3(name: string, value: Float32Array): ShaderMaterial {
+    public setMatrix3x3(name: string, value: Float32Array | Array<number>): ShaderMaterial {
         this._checkUniform(name);
         this._matrices3x3[name] = value;
 
@@ -406,7 +412,7 @@ export class ShaderMaterial extends Material {
      * @param value Define the value to give to the uniform
      * @return the material itself allowing "fluent" like uniform updates
      */
-    public setMatrix2x2(name: string, value: Float32Array): ShaderMaterial {
+    public setMatrix2x2(name: string, value: Float32Array | Array<number>): ShaderMaterial {
         this._checkUniform(name);
         this._matrices2x2[name] = value;
 
@@ -457,7 +463,8 @@ export class ShaderMaterial extends Material {
             return true;
         }
 
-        if (this._effect && (this._effect.defines.indexOf("#define INSTANCES") !== -1) !== useInstances) {
+        const effect = this.getEffect();
+        if (effect && (effect.defines.indexOf("#define INSTANCES") !== -1) !== useInstances) {
             return false;
         }
 
@@ -472,18 +479,20 @@ export class ShaderMaterial extends Material {
      * @returns a boolean indicating that the submesh is ready or not
      */
     public isReadyForSubMesh(mesh: AbstractMesh, subMesh: SubMesh, useInstances?: boolean): boolean {
-        return this.isReady(mesh, useInstances);
+        return this.isReady(mesh, useInstances, subMesh);
     }
 
     /**
      * Checks if the material is ready to render the requested mesh
      * @param mesh Define the mesh to render
      * @param useInstances Define whether or not the material is used with instances
+     * @param subMesh defines which submesh to render
      * @returns true if ready, otherwise false
      */
-    public isReady(mesh?: AbstractMesh, useInstances?: boolean): boolean {
-        if (this._effect && this.isFrozen) {
-            if (this._effect._wasPreviouslyReady) {
+    public isReady(mesh?: AbstractMesh, useInstances?: boolean, subMesh?: SubMesh): boolean {
+        let effect = this.getEffect();
+        if (effect && this.isFrozen) {
+            if (effect._wasPreviouslyReady) {
                 return true;
             }
         }
@@ -504,6 +513,11 @@ export class ShaderMaterial extends Material {
         var attribs = [];
         var fallbacks = new EffectFallbacks();
 
+        let shaderName = this._shaderPath,
+            uniforms = this._options.uniforms,
+            uniformBuffers = this._options.uniformBuffers,
+            samplers = this._options.samplers;
+
         // global multiview
         if (engine.getCaps().multiview &&
             scene.activeCamera &&
@@ -512,7 +526,7 @@ export class ShaderMaterial extends Material {
             this._multiview = true;
             defines.push("#define MULTIVIEW");
             if (this._options.uniforms.indexOf("viewProjection") !== -1 &&
-                this._options.uniforms.push("viewProjectionR") === -1) {
+                this._options.uniforms.indexOf("viewProjectionR") === -1) {
                 this._options.uniforms.push("viewProjectionR");
             }
         }
@@ -539,8 +553,6 @@ export class ShaderMaterial extends Material {
         }
 
         // Bones
-        let numInfluencers = 0;
-
         if (mesh && mesh.useBones && mesh.computeBonesUsingShaders && mesh.skeleton) {
             attribs.push(VertexBuffer.MatricesIndicesKind);
             attribs.push(VertexBuffer.MatricesWeightsKind);
@@ -551,9 +563,7 @@ export class ShaderMaterial extends Material {
 
             const skeleton = mesh.skeleton;
 
-            numInfluencers = mesh.numBoneInfluencers;
-
-            defines.push("#define NUM_BONE_INFLUENCERS " + numInfluencers);
+            defines.push("#define NUM_BONE_INFLUENCERS " + mesh.numBoneInfluencers);
             fallbacks.addCPUSkinningFallback(0, mesh);
 
             if (skeleton.isUsingTextureForMatrices) {
@@ -573,9 +583,65 @@ export class ShaderMaterial extends Material {
                     this._options.uniforms.push("mBones");
                 }
             }
-
         } else {
             defines.push("#define NUM_BONE_INFLUENCERS 0");
+        }
+
+        // Morph
+        let numInfluencers = 0;
+        const manager = mesh ? (<Mesh>mesh).morphTargetManager : null;
+        if (manager) {
+            const uv = manager.supportsUVs && defines.indexOf("#define UV1") !== -1;
+            const tangent = manager.supportsTangents && defines.indexOf("#define TANGENT") !== -1;
+            const normal = manager.supportsNormals && defines.indexOf("#define NORMAL") !== -1;
+            numInfluencers = manager.numInfluencers;
+            if (uv) {
+                defines.push("#define MORPHTARGETS_UV");
+            }
+            if (tangent) {
+                defines.push("#define MORPHTARGETS_TANGENT");
+            }
+            if (normal) {
+                defines.push("#define MORPHTARGETS_NORMAL");
+            }
+            if (numInfluencers > 0) {
+                defines.push("#define MORPHTARGETS");
+            }
+            if (manager.isUsingTextureForTargets) {
+                defines.push("#define MORPHTARGETS_TEXTURE");
+
+                if (this._options.uniforms.indexOf("morphTargetTextureIndices") === -1) {
+                    this._options.uniforms.push("morphTargetTextureIndices");
+                }
+
+                if (this._options.samplers.indexOf("morphTargets") === -1) {
+                    this._options.samplers.push("morphTargets");
+                }
+            }
+            defines.push("#define NUM_MORPH_INFLUENCERS " + numInfluencers);
+            for (var index = 0; index < numInfluencers; index++) {
+                attribs.push(VertexBuffer.PositionKind + index);
+
+                if (normal) {
+                    attribs.push(VertexBuffer.NormalKind + index);
+                }
+
+                if (tangent) {
+                    attribs.push(VertexBuffer.TangentKind + index);
+                }
+
+                if (uv) {
+                    attribs.push(VertexBuffer.UVKind + "_" + index);
+                }
+            }
+            if (numInfluencers > 0) {
+                uniforms = uniforms.slice();
+                uniforms.push("morphTargetInfluences");
+                uniforms.push("morphTargetTextureInfo");
+                uniforms.push("morphTargetTextureIndices");
+            }
+        } else {
+            defines.push("#define NUM_MORPH_INFLUENCERS 0");
         }
 
         // Textures
@@ -590,10 +656,48 @@ export class ShaderMaterial extends Material {
             defines.push("#define ALPHATEST");
         }
 
-        let shaderName = this._shaderPath,
-            uniforms = this._options.uniforms,
-            uniformBuffers = this._options.uniformBuffers,
-            samplers = this._options.samplers;
+        // Clip planes
+        if ((this._options.useClipPlane === null && !!scene.clipPlane) || this._options.useClipPlane) {
+            defines.push("#define CLIPPLANE");
+            if (uniforms.indexOf("vClipPlane") === -1) {
+                uniforms.push("vClipPlane");
+            }
+        }
+
+        if ((this._options.useClipPlane === null && !!scene.clipPlane2) || this._options.useClipPlane) {
+            defines.push("#define CLIPPLANE2");
+            if (uniforms.indexOf("vClipPlane2") === -1) {
+                uniforms.push("vClipPlane2");
+            }
+        }
+
+        if ((this._options.useClipPlane === null && !!scene.clipPlane3) || this._options.useClipPlane) {
+            defines.push("#define CLIPPLANE3");
+            if (uniforms.indexOf("vClipPlane3") === -1) {
+                uniforms.push("vClipPlane3");
+            }
+        }
+
+        if ((this._options.useClipPlane === null && !!scene.clipPlane4) || this._options.useClipPlane) {
+            defines.push("#define CLIPPLANE4");
+            if (uniforms.indexOf("vClipPlane4") === -1) {
+                uniforms.push("vClipPlane4");
+            }
+        }
+
+        if ((this._options.useClipPlane === null && !!scene.clipPlane5) || this._options.useClipPlane) {
+            defines.push("#define CLIPPLANE5");
+            if (uniforms.indexOf("vClipPlane5") === -1) {
+                uniforms.push("vClipPlane5");
+            }
+        }
+
+        if ((this._options.useClipPlane === null && !!scene.clipPlane6) || this._options.useClipPlane) {
+            defines.push("#define CLIPPLANE6");
+            if (uniforms.indexOf("vClipPlane6") === -1) {
+                uniforms.push("vClipPlane6");
+            }
+        }
 
         if (this.customShaderNameResolve) {
             uniforms = uniforms.slice();
@@ -602,13 +706,13 @@ export class ShaderMaterial extends Material {
             shaderName = this.customShaderNameResolve(shaderName, uniforms, uniformBuffers, samplers, defines, attribs);
         }
 
-        var previousEffect = this._effect;
+        var previousEffect = effect;
         var join = defines.join("\n");
 
         if (this._cachedDefines !== join) {
             this._cachedDefines = join;
 
-            this._effect = engine.createEffect(shaderName, <IEffectCreationOptions>{
+            effect = engine.createEffect(shaderName, <IEffectCreationOptions>{
                 attributes: attribs,
                 uniformsNames: uniforms,
                 uniformBuffersNames: uniformBuffers,
@@ -620,22 +724,25 @@ export class ShaderMaterial extends Material {
                 indexParameters: { maxSimultaneousMorphTargets: numInfluencers }
             }, engine);
 
+            this._drawWrapper.effect = effect;
+
             if (this._onEffectCreatedObservable) {
-                onCreatedEffectParameters.effect = this._effect;
+                onCreatedEffectParameters.effect = effect;
+                onCreatedEffectParameters.subMesh = subMesh ?? mesh?.subMeshes[0] ?? null;
                 this._onEffectCreatedObservable.notifyObservers(onCreatedEffectParameters);
             }
         }
 
-        if (!this._effect?.isReady() ?? true) {
+        if (!effect?.isReady() ?? true) {
             return false;
         }
 
-        if (previousEffect !== this._effect) {
+        if (previousEffect !== effect) {
             scene.resetCachedMaterial();
         }
 
         this._renderId = scene.getRenderId();
-        this._effect._wasPreviouslyReady = true;
+        effect._wasPreviouslyReady = true;
 
         return true;
     }
@@ -648,7 +755,7 @@ export class ShaderMaterial extends Material {
     public bindOnlyWorldMatrix(world: Matrix, effectOverride?: Nullable<Effect>): void {
         var scene = this.getScene();
 
-        const effect = effectOverride ?? this._effect;
+        const effect = effectOverride ?? this.getEffect();
 
         if (!effect) {
             return;
@@ -676,7 +783,7 @@ export class ShaderMaterial extends Material {
      * @param subMesh defines the submesh to bind the material to
      */
     public bindForSubMesh(world: Matrix, mesh: Mesh, subMesh: SubMesh): void {
-        this.bind(world, mesh, subMesh._effectOverride);
+        this.bind(world, mesh, subMesh._drawWrapperOverride?.effect);
     }
 
     /**
@@ -689,18 +796,43 @@ export class ShaderMaterial extends Material {
         // Std values
         this.bindOnlyWorldMatrix(world, effectOverride);
 
-        const effect = effectOverride ?? this._effect;
+        const effect = effectOverride ?? this.getEffect();
 
-        if (effect && this.getScene().getCachedMaterial() !== this) {
-            if (this._options.uniforms.indexOf("view") !== -1) {
+        const uniformBuffers = this._options.uniformBuffers;
+
+        let useSceneUBO = false;
+
+        if (effect && uniformBuffers && uniformBuffers.length > 0 && this.getScene().getEngine().supportsUniformBuffers) {
+            for (let i = 0; i < uniformBuffers.length; ++i) {
+                const bufferName = uniformBuffers[i];
+                switch (bufferName) {
+                    case "Mesh":
+                        if (mesh) {
+                            mesh.getMeshUniformBuffer().bindToEffect(effect, "Mesh");
+                            mesh.transferToEffect(world);
+                        }
+                        break;
+                    case "Scene":
+                        this.getScene().finalizeSceneUbo();
+                        MaterialHelper.BindSceneUniformBuffer(effect, this.getScene().getSceneUniformBuffer());
+                        useSceneUBO = true;
+                        break;
+                }
+            }
+        }
+
+        let mustRebind = this.getScene().getCachedMaterial() !== this;
+
+        if (effect && mustRebind) {
+            if (!useSceneUBO && this._options.uniforms.indexOf("view") !== -1) {
                 effect.setMatrix("view", this.getScene().getViewMatrix());
             }
 
-            if (this._options.uniforms.indexOf("projection") !== -1) {
+            if (!useSceneUBO && this._options.uniforms.indexOf("projection") !== -1) {
                 effect.setMatrix("projection", this.getScene().getProjectionMatrix());
             }
 
-            if (this._options.uniforms.indexOf("viewProjection") !== -1) {
+            if (!useSceneUBO && this._options.uniforms.indexOf("viewProjection") !== -1) {
                 effect.setMatrix("viewProjection", this.getScene().getTransformMatrix());
                 if (this._multiview) {
                     effect.setMatrix("viewProjectionR", this.getScene()._transformMatrixR);
@@ -713,6 +845,9 @@ export class ShaderMaterial extends Material {
 
             // Bones
             MaterialHelper.BindBonesParameters(mesh, effect);
+
+            // Clip plane
+            MaterialHelper.BindClipPlane(effect, this.getScene());
 
             var name: string;
             // Texture
@@ -812,16 +947,24 @@ export class ShaderMaterial extends Material {
             }
         }
 
-        const seffect = this._effect;
+        if (effect && mesh && (mustRebind || !this.isFrozen)) {
+            // Morph targets
+            const manager = (<Mesh>mesh).morphTargetManager;
+            if (manager && manager.numInfluencers > 0) {
+                MaterialHelper.BindMorphTargetParameters(<Mesh>mesh, effect);
+            }
+        }
 
-        this._effect = effect; // make sure the active effect is the right one if there are some observers for onBind that would need to get the current effect
-        this._afterBind(mesh);
-        this._effect = seffect;
+        const seffect = this.getEffect();
+
+        this._drawWrapper.effect = effect; // make sure the active effect is the right one if there are some observers for onBind that would need to get the current effect
+        this._afterBind(mesh, effect);
+        this._drawWrapper.effect = seffect;
     }
 
-    protected _afterBind(mesh?: Mesh): void {
-        super._afterBind(mesh);
-        this.getScene()._cachedEffect = this._effect;
+    protected _afterBind(mesh?: Mesh, effect: Nullable<Effect> = null): void {
+        super._afterBind(mesh, effect);
+        this.getScene()._cachedEffect = effect;
     }
 
     /**
@@ -898,6 +1041,9 @@ export class ShaderMaterial extends Material {
                 (<string[]>this._options[propName]) = propValue.slice(0);
             }
         });
+
+        // Stencil
+        this.stencil.copyTo(result.stencil);
 
         // Texture
         for (var key in this._textures) {
@@ -996,6 +1142,9 @@ export class ShaderMaterial extends Material {
         serializationObject.shaderPath = this._shaderPath;
 
         var name: string;
+
+        // Stencil
+        serializationObject.stencil = this.stencil.serialize();
 
         // Texture
         serializationObject.textures = {};
@@ -1114,7 +1263,7 @@ export class ShaderMaterial extends Material {
 
     /**
      * Creates a shader material from parsed shader material data
-     * @param source defines the JSON represnetation of the material
+     * @param source defines the JSON representation of the material
      * @param scene defines the hosting scene
      * @param rootUrl defines the root URL to use to load textures and relative dependencies
      * @returns a new material
@@ -1123,6 +1272,11 @@ export class ShaderMaterial extends Material {
         var material = SerializationHelper.Parse(() => new ShaderMaterial(source.name, scene, source.shaderPath, source.options), source, scene, rootUrl);
 
         var name: string;
+
+        // Stencil
+        if (source.stencil) {
+            material.stencil.parse(source.stencil, scene, rootUrl);
+        }
 
         // Texture
         for (name in source.textures) {

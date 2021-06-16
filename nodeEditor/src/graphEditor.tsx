@@ -23,6 +23,7 @@ import { GraphFrame } from './diagram/graphFrame';
 import * as ReactDOM from 'react-dom';
 import { IInspectorOptions } from "babylonjs/Debug/debugLayer";
 import { _TypeStore } from 'babylonjs/Misc/typeStore';
+import { Popup } from "./sharedComponents/popup";
 
 
 require("./main.scss");
@@ -119,11 +120,16 @@ export class GraphEditor extends React.Component<IGraphEditorProps, IGraphEditor
         if (this.props.globalState.hostDocument) {
             this._graphCanvas = (this.refs["graphCanvas"] as GraphCanvasComponent);
             this._previewManager = new PreviewManager(this.props.globalState.hostDocument.getElementById("preview-canvas") as HTMLCanvasElement, this.props.globalState);
+            (this.props.globalState as any)._previewManager = this._previewManager;
         }
 
         if (navigator.userAgent.indexOf("Mobile") !== -1) {
             ((this.props.globalState.hostDocument || document).querySelector(".blocker") as HTMLElement).style.visibility = "visible";
         }
+
+        this.props.globalState.onPopupClosedObservable.addOnce(() => {
+            this.componentWillUnmount();
+        });
 
         this.build();
     }
@@ -135,6 +141,7 @@ export class GraphEditor extends React.Component<IGraphEditorProps, IGraphEditor
 
         if (this._previewManager) {
             this._previewManager.dispose();
+            this._previewManager = null as any;
         }
     }
 
@@ -202,6 +209,26 @@ export class GraphEditor extends React.Component<IGraphEditorProps, IGraphEditor
                 }
 
                 if (this._graphCanvas.selectedFrame) {
+                    var frame = this._graphCanvas.selectedFrame;
+                    
+                    if(frame.isCollapsed) {
+                        while(frame.nodes.length > 0) {
+                            let targetBlock = frame.nodes[0].block;
+                            this.props.globalState.nodeMaterial!.removeBlock(targetBlock);
+                            let blockIndex = this._blocks.indexOf(targetBlock);
+        
+                            if (blockIndex > -1) {
+                                this._blocks.splice(blockIndex, 1);
+                            }
+                            frame.nodes[0].dispose();            
+                        }
+                        frame.isCollapsed = false;
+                    }
+                    else {
+                        frame.nodes.forEach(node => {
+                            node.enclosingFrameId = -1;
+                        });
+                    }
                     this._graphCanvas.selectedFrame.dispose();
                 }
 
@@ -544,10 +571,35 @@ export class GraphEditor extends React.Component<IGraphEditorProps, IGraphEditor
     emitNewBlock(event: React.DragEvent<HTMLDivElement>) {
         var data = event.dataTransfer.getData("babylonjs-material-node") as string;
         let newNode: GraphNode;
+        
+        if(data.indexOf("Custom") > -1) {
+            let storageData = localStorage.getItem(data);
+            if(storageData) {   
+                let frameData = JSON.parse(storageData);
+
+                //edit position before loading.
+                let newX = (event.clientX - event.currentTarget.offsetLeft - this._graphCanvas.x - this.NodeWidth) / this._graphCanvas.zoom;
+                let newY = (event.clientY - event.currentTarget.offsetTop - this._graphCanvas.y - 20) / this._graphCanvas.zoom;;
+                let oldX = frameData.editorData.frames[0].x;
+                let oldY = frameData.editorData.frames[0].y;
+                frameData.editorData.frames[0].x = newX;
+                frameData.editorData.frames[0].y = newY;
+                for (var location of frameData.editorData.locations) {
+                    location.x +=  newX - oldX;
+                    location.y +=  newY - oldY;       
+                }
+
+                SerializationTools.AddFrameToMaterial(frameData, this.props.globalState, this.props.globalState.nodeMaterial); 
+                this._graphCanvas.frames[this._graphCanvas.frames.length -1].cleanAccumulation();
+                this.forceUpdate();
+                return;
+            }
+        }
 
         if (data.indexOf("Block") === -1) {
             newNode = this.addValueNode(data);
-        } else {
+        } 
+        else {
             let block = BlockTools.GetBlockFromString(data, this.props.globalState.nodeMaterial.getScene(), this.props.globalState.nodeMaterial)!;   
             
             if (block.isUnique) {
@@ -604,7 +656,9 @@ export class GraphEditor extends React.Component<IGraphEditorProps, IGraphEditor
     }
 
     handleClosingPopUp = () => {
-        this._previewManager.dispose();
+        if (this._previewManager) {
+            this._previewManager.dispose();
+        }
         this._popUpWindow.close();
         this.setState({
             showPreviewPopUp: false
@@ -679,46 +733,17 @@ export class GraphEditor extends React.Component<IGraphEditorProps, IGraphEditor
         parentControl.style.display = "grid";
         parentControl.style.gridTemplateRows = "40px auto";
         parentControl.id = 'node-editor-graph-root';
-        parentControl.className = 'right-panel';
+        parentControl.className = 'right-panel popup';
 
         popupWindow.document.body.appendChild(parentControl);
 
-        this.copyStyles(this.props.globalState.hostWindow.document, parentDocument);
+        Popup._CopyStyles(this.props.globalState.hostWindow.document, parentDocument);
 
         (this as any)[windowVariableName] = popupWindow;
 
         this._popUpWindow = popupWindow;
 
         return popupWindow;
-    }
-
-    copyStyles = (sourceDoc: HTMLDocument, targetDoc: HTMLDocument) => {
-        const styleContainer = [];
-        for (var index = 0; index < sourceDoc.styleSheets.length; index++) {
-            var styleSheet: any = sourceDoc.styleSheets[index];
-            try {
-                if (styleSheet.href) { // for <link> elements loading CSS from a URL
-                    const newLinkEl = sourceDoc.createElement('link');
-
-                    newLinkEl.rel = 'stylesheet';
-                    newLinkEl.href = styleSheet.href;
-                    targetDoc.head!.appendChild(newLinkEl);
-                    styleContainer.push(newLinkEl);
-                }
-                else if (styleSheet.cssRules) { // for <style> elements
-                    const newStyleEl = sourceDoc.createElement('style');
-
-                    for (var cssRule of styleSheet.cssRules) {
-                        newStyleEl.appendChild(sourceDoc.createTextNode(cssRule.cssText));
-                    }
-
-                    targetDoc.head!.appendChild(newStyleEl);
-                    styleContainer.push(newStyleEl);
-                } 
-            } catch (e) {
-                console.log(e);
-            }
-        }
     }
 
     createPreviewMeshControlHost = (options: IInternalPreviewAreaOptions, parentControl: Nullable<HTMLElement>) => {
@@ -746,9 +771,12 @@ export class GraphEditor extends React.Component<IGraphEditorProps, IGraphEditor
 
             host.id = "PreviewAreaComponent-host";
             host.style.width = options.embedHostWidth || "auto";
+            host.style.height = "100%";
+            host.style.overflow = "hidden";
             host.style.display = "grid";
             host.style.gridRow = '2';
             host.style.gridTemplateRows = "auto 40px";
+            host.style.gridTemplateRows = "calc(100% - 40px) 40px";
 
             parentControl.appendChild(host);
 
@@ -824,7 +852,12 @@ export class GraphEditor extends React.Component<IGraphEditorProps, IGraphEditor
                             event.preventDefault();
                         }}
                     >                        
-                        <GraphCanvasComponent ref={"graphCanvas"} globalState={this.props.globalState}/>
+                        <GraphCanvasComponent ref={"graphCanvas"} 
+                            globalState={this.props.globalState}
+                            onEmitNewBlock={ block => {
+                                return this.createNodeFromObject(block);
+                            }
+                            }/>
                     </div>
 
                     <div id="rightGrab"

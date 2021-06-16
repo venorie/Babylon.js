@@ -9,7 +9,7 @@ import { MaterialDefines } from "babylonjs/Materials/materialDefines";
 import { MaterialHelper } from "babylonjs/Materials/materialHelper";
 import { PushMaterial } from "babylonjs/Materials/pushMaterial";
 import { MaterialFlags } from "babylonjs/Materials/materialFlags";
-import { VertexBuffer } from "babylonjs/Meshes/buffer";
+import { VertexBuffer } from "babylonjs/Buffers/buffer";
 import { AbstractMesh } from "babylonjs/Meshes/abstractMesh";
 import { SubMesh } from "babylonjs/Meshes/subMesh";
 import { Mesh } from "babylonjs/Meshes/mesh";
@@ -39,6 +39,7 @@ class FireMaterialDefines extends MaterialDefines {
     public BonesPerMesh = 0;
     public NUM_BONE_INFLUENCERS = 0;
     public INSTANCES = false;
+    public IMAGEPROCESSINGPOSTPROCESS = false;
 
     constructor() {
         super();
@@ -96,7 +97,7 @@ export class FireMaterial extends PushMaterial {
         }
 
         if (!subMesh._materialDefines) {
-            subMesh._materialDefines = new FireMaterialDefines();
+            subMesh.materialDefines = new FireMaterialDefines();
         }
 
         var defines = <FireMaterialDefines>subMesh._materialDefines;
@@ -151,6 +152,8 @@ export class FireMaterial extends PushMaterial {
                 fallbacks.addCPUSkinningFallback(0, mesh);
             }
 
+            defines.IMAGEPROCESSINGPOSTPROCESS = scene.imageProcessingConfiguration.applyByPostProcess;
+
             //Attributes
             var attribs = [VertexBuffer.PositionKind];
 
@@ -192,7 +195,7 @@ export class FireMaterial extends PushMaterial {
                     indexParameters: null,
                     maxSimultaneousLights: 4,
                     transformFeedbackVaryings: null
-                }, engine), defines);
+                }, engine), defines, this._materialContext);
         }
 
         if (!subMesh.effect || !subMesh.effect.isReady()) {
@@ -246,7 +249,7 @@ export class FireMaterial extends PushMaterial {
                 this._activeEffect.setFloat("pointSize", this.pointSize);
             }
 
-            MaterialHelper.BindEyePosition(effect, scene);
+            scene.bindEyePosition(effect);
         }
 
         this._activeEffect.setColor4("vDiffuseColor", this._scaledDiffuse, this.alpha * mesh.visibility);

@@ -1,20 +1,18 @@
-import { FloatArray, IndicesArray } from "babylonjs/types";
+import { FloatArray, IndicesArray, Nullable } from "babylonjs/types";
 import { Vector3, Vector2 } from "babylonjs/Maths/math.vector";
 import { Color4 } from 'babylonjs/Maths/math.color';
 import { Tools } from "babylonjs/Misc/tools";
 import { VertexData } from "babylonjs/Meshes/mesh.vertexData";
 import { Geometry } from "babylonjs/Meshes/geometry";
-import { AnimationGroup } from "babylonjs/Animations/animationGroup";
-import { Skeleton } from "babylonjs/Bones/skeleton";
-import { IParticleSystem } from "babylonjs/Particles/IParticleSystem";
 import { AbstractMesh } from "babylonjs/Meshes/abstractMesh";
 import { Mesh } from "babylonjs/Meshes/mesh";
-import { SceneLoader, ISceneLoaderPluginAsync, ISceneLoaderProgressEvent, ISceneLoaderPluginFactory, ISceneLoaderPlugin } from "babylonjs/Loading/sceneLoader";
+import { SceneLoader, ISceneLoaderPluginAsync, ISceneLoaderProgressEvent, ISceneLoaderPluginFactory, ISceneLoaderPlugin, ISceneLoaderAsyncResult } from "babylonjs/Loading/sceneLoader";
 
 import { AssetContainer } from "babylonjs/assetContainer";
 import { Scene } from "babylonjs/scene";
 import { WebRequest } from 'babylonjs/Misc/webRequest';
 import { MTLFileLoader } from './mtlFileLoader';
+import { VertexBuffer } from "babylonjs/Buffers/buffer";
 
 type MeshObject = {
     name: string;
@@ -54,6 +52,11 @@ type MeshLoadOptions = {
      * Compute the normals for the model, even if normals are present in the file.
      */
     ComputeNormals: boolean,
+    /**
+     * Optimize the normals for the model. Lighting can be uneven if you use OptimizeWithUV = true because new vertices can be created for the same location if they pertain to different faces.
+     * Using OptimizehNormals = true will help smoothing the lighting by averaging the normals of those vertices.
+     */
+    OptimizeNormals: boolean,
     /**
      * Skip loading the materials even if defined in the OBJ file (materials are ignored).
      */
@@ -98,6 +101,11 @@ export class OBJFileLoader implements ISceneLoaderPluginAsync, ISceneLoaderPlugi
      */
     public static COMPUTE_NORMALS = false;
     /**
+     * Optimize the normals for the model. Lighting can be uneven if you use OptimizeWithUV = true because new vertices can be created for the same location if they pertain to different faces.
+     * Using OptimizehNormals = true will help smoothing the lighting by averaging the normals of those vertices.
+     */
+    public static OPTIMIZE_NORMALS = false;
+    /**
      * Defines custom scaling of UV coordinates of loaded meshes.
      */
     public static UV_SCALING = new Vector2(1, 1);
@@ -131,13 +139,13 @@ export class OBJFileLoader implements ISceneLoaderPluginAsync, ISceneLoaderPlugi
     /** @hidden */
     public smooth = /^s /;
     /** @hidden */
-    public vertexPattern = /v( +[\d|\.|\+|\-|e|E]+){3,7}/;
+    public vertexPattern = /v(\s+[\d|\.|\+|\-|e|E]+){3,7}/;
     // vn float float float
     /** @hidden */
-    public normalPattern = /vn( +[\d|\.|\+|\-|e|E]+)( +[\d|\.|\+|\-|e|E]+)( +[\d|\.|\+|\-|e|E]+)/;
+    public normalPattern = /vn(\s+[\d|\.|\+|\-|e|E]+)( +[\d|\.|\+|\-|e|E]+)( +[\d|\.|\+|\-|e|E]+)/;
     // vt float float
     /** @hidden */
-    public uvPattern = /vt( +[\d|\.|\+|\-|e|E]+)( +[\d|\.|\+|\-|e|E]+)/;
+    public uvPattern = /vt(\s+[\d|\.|\+|\-|e|E]+)( +[\d|\.|\+|\-|e|E]+)/;
     // f vertex vertex vertex ...
     /** @hidden */
     public facePattern1 = /f\s+(([\d]{1,}[\s]?){3,})+/;
@@ -154,7 +162,7 @@ export class OBJFileLoader implements ISceneLoaderPluginAsync, ISceneLoaderPlugi
     /** @hidden */
     public facePattern5 = /f\s+(((-[\d]{1,}\/-[\d]{1,}\/-[\d]{1,}[\s]?){3,})+)/;
 
-    private _forAssetContainer = false;
+    private _assetContainer: Nullable<AssetContainer> = null;
 
     private _meshLoadOptions: MeshLoadOptions;
 
@@ -170,6 +178,7 @@ export class OBJFileLoader implements ISceneLoaderPluginAsync, ISceneLoaderPlugi
     private static get currentMeshLoadOptions(): MeshLoadOptions {
         return {
             ComputeNormals: OBJFileLoader.COMPUTE_NORMALS,
+            OptimizeNormals: OBJFileLoader.OPTIMIZE_NORMALS,
             ImportVertexColors: OBJFileLoader.IMPORT_VERTEX_COLORS,
             InvertY: OBJFileLoader.INVERT_Y,
             InvertTextureY: OBJFileLoader.INVERT_TEXTURE_Y,
@@ -193,7 +202,7 @@ export class OBJFileLoader implements ISceneLoaderPluginAsync, ISceneLoaderPlugi
      */
     private _loadMTL(url: string, rootUrl: string, onSuccess: (response: string | ArrayBuffer, responseUrl?: string) => any, onFailure: (pathOfFile: string, exception?: any) => void) {
         //The complete path to the mtl file
-        var pathOfFile = Tools.BaseUrl + rootUrl + url;
+        var pathOfFile = rootUrl + url;
 
         // Loads through the babylon tools to allow fileInput search.
         Tools.LoadFile(
@@ -236,14 +245,17 @@ export class OBJFileLoader implements ISceneLoaderPluginAsync, ISceneLoaderPlugi
      * @param fileName Defines the name of the file to load
      * @returns a promise containg the loaded meshes, particles, skeletons and animations
      */
-    public importMeshAsync(meshesNames: any, scene: Scene, data: any, rootUrl: string, onProgress?: (event: ISceneLoaderProgressEvent) => void, fileName?: string): Promise<{ meshes: AbstractMesh[], particleSystems: IParticleSystem[], skeletons: Skeleton[], animationGroups: AnimationGroup[] }> {
+    public importMeshAsync(meshesNames: any, scene: Scene, data: any, rootUrl: string, onProgress?: (event: ISceneLoaderProgressEvent) => void, fileName?: string): Promise<ISceneLoaderAsyncResult> {
         //get the meshes from OBJ file
         return this._parseSolid(meshesNames, scene, data, rootUrl).then((meshes) => {
             return {
-                meshes,
+                meshes: meshes,
                 particleSystems: [],
                 skeletons: [],
-                animationGroups: []
+                animationGroups: [],
+                transformNodes: [],
+                geometries: [],
+                lights: []
             };
         });
     }
@@ -274,10 +286,10 @@ export class OBJFileLoader implements ISceneLoaderPluginAsync, ISceneLoaderPlugi
      * @returns The loaded asset container
      */
     public loadAssetContainerAsync(scene: Scene, data: string, rootUrl: string, onProgress?: (event: ISceneLoaderProgressEvent) => void, fileName?: string): Promise<AssetContainer> {
-        this._forAssetContainer = true;
+        var container = new AssetContainer(scene);
+        this._assetContainer = container;
 
         return this.importMeshAsync(null, scene, data, rootUrl).then((result) => {
-            var container = new AssetContainer(scene);
             result.meshes.forEach((mesh) => container.meshes.push(mesh));
             result.meshes.forEach((mesh) => {
                 var material = mesh.material;
@@ -296,12 +308,63 @@ export class OBJFileLoader implements ISceneLoaderPluginAsync, ISceneLoaderPlugi
                     }
                 }
             });
-            this._forAssetContainer = false;
+            this._assetContainer = null;
             return container;
         }).catch((ex) => {
-            this._forAssetContainer = false;
+            this._assetContainer = null;
             throw ex;
         });
+    }
+
+    private _optimizeNormals(mesh: AbstractMesh): void {
+        const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
+        const normals = mesh.getVerticesData(VertexBuffer.NormalKind);
+        const mapVertices: { [key: string]: number[] } = {};
+
+        if (!positions || !normals) {
+            return;
+        }
+
+        for (let i = 0; i < positions.length / 3; i++) {
+            const x = positions[i * 3 + 0];
+            const y = positions[i * 3 + 1];
+            const z = positions[i * 3 + 2];
+            const key = x + "_" + y + "_" + z;
+
+            let lst = mapVertices[key];
+            if (!lst) {
+                lst = [];
+                mapVertices[key] = lst;
+            }
+            lst.push(i);
+        }
+
+        const normal = new Vector3();
+        for (const key in mapVertices) {
+            const lst = mapVertices[key];
+            if (lst.length < 2) {
+                continue;
+            }
+
+            const v0Idx = lst[0];
+            for (let i = 1; i < lst.length; ++i) {
+                const vIdx = lst[i];
+                normals[v0Idx * 3 + 0] += normals[vIdx * 3 + 0];
+                normals[v0Idx * 3 + 1] += normals[vIdx * 3 + 1];
+                normals[v0Idx * 3 + 2] += normals[vIdx * 3 + 2];
+            }
+
+            normal.copyFromFloats(normals[v0Idx * 3 + 0], normals[v0Idx * 3 + 1], normals[v0Idx * 3 + 2]);
+            normal.normalize();
+
+            for (let i = 0; i < lst.length; ++i) {
+                const vIdx = lst[i];
+                normals[vIdx * 3 + 0] = normal.x;
+                normals[vIdx * 3 + 1] = normal.y;
+                normals[vIdx * 3 + 2] = normal.z;
+            }
+        }
+        mesh.setVerticesData(VertexBuffer.NormalKind, normals);
     }
 
     /**
@@ -928,8 +991,9 @@ export class OBJFileLoader implements ISceneLoaderPluginAsync, ISceneLoaderPlugi
             handledMesh = meshesFromObj[j];
             //Create a Mesh with the name of the obj mesh
 
-            scene._blockEntityCollection = this._forAssetContainer;
+            scene._blockEntityCollection = !!this._assetContainer;
             var babylonMesh = new Mesh(meshesFromObj[j].name, scene);
+            babylonMesh._parentContainer = this._assetContainer;
             scene._blockEntityCollection = false;
 
             //Push the name of the material to an array
@@ -956,12 +1020,15 @@ export class OBJFileLoader implements ISceneLoaderPluginAsync, ISceneLoaderPlugi
             if (this._meshLoadOptions.InvertY) {
                 babylonMesh.scaling.y *= -1;
             }
+            if (this._meshLoadOptions.OptimizeNormals === true) {
+                this._optimizeNormals(babylonMesh);
+            }
 
             //Push the mesh into an array
             babylonMeshesArray.push(babylonMesh);
         }
 
-        let mtlPromises: Array<Promise<any>> = [];
+        let mtlPromises: Array<Promise<void>> = [];
         //load the materials
         //Check if we have a file to load
         if (fileToLoad !== "" && this._meshLoadOptions.SkipMaterials === false) {
@@ -970,7 +1037,7 @@ export class OBJFileLoader implements ISceneLoaderPluginAsync, ISceneLoaderPlugi
                 this._loadMTL(fileToLoad, rootUrl, (dataLoaded) => {
                     try {
                         //Create materials thanks MTLLoader function
-                        materialsFromMTLFile.parseMTL(scene, dataLoaded, rootUrl, this._forAssetContainer);
+                        materialsFromMTLFile.parseMTL(scene, dataLoaded, rootUrl, this._assetContainer);
                         //Look at each material loaded in the mtl file
                         for (var n = 0; n < materialsFromMTLFile.materials.length; n++) {
                             //Three variables to get all meshes with the same material

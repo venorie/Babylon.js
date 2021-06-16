@@ -49,10 +49,12 @@ so that you can start straight away.
 
 ## Pull requests
 
-We are not complicated people, but we still have some [coding guidelines](https://doc.babylonjs.com/how_to/approved_naming_conventions)
-Before submitting your PR, just check that everything goes well by [creating the minified version](https://doc.babylonjs.com/resources/creating_the_mini-fied_version)
+We are not complicated people, but we still have some [coding guidelines](https://doc.babylonjs.com/divingDeeper/developWithBjs/approvedNamingConventions)
+Before submitting your PR, just check that everything goes well by [creating the minified version](https://doc.babylonjs.com/advanced_topics/minifiedVer)
 
-You should read the [how to contribute documentation](https://doc.babylonjs.com/how_to/how_to_start) before working on your PR.
+You should read the [how to contribute documentation](https://doc.babylonjs.com/divingDeeper/developWithBjs/howToStart) before working on your PR.
+
+If you intent to only update the doc, this [documentation](https://doc.babylonjs.com/divingDeeper/developWithBjs/contributeToDocs) would detail the process.
 
 To validate your PR, please follow these steps:
 

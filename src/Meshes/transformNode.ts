@@ -158,7 +158,8 @@ export class TransformNode extends Node {
     private _absoluteRotationQuaternion = Quaternion.Identity();
     private _pivotMatrix = Matrix.Identity();
     private _pivotMatrixInverse: Matrix;
-    protected _postMultiplyPivotMatrix = false;
+    /** @hidden */
+    public _postMultiplyPivotMatrix = false;
 
     protected _isWorldMatrixFrozen = false;
 
@@ -442,11 +443,21 @@ export class TransformNode extends Node {
     /**
      * Prevents the World matrix to be computed any longer
      * @param newWorldMatrix defines an optional matrix to use as world matrix
+     * @param decompose defines whether to decompose the given newWorldMatrix or directly assign
      * @returns the TransformNode.
      */
-    public freezeWorldMatrix(newWorldMatrix: Nullable<Matrix> = null): TransformNode {
+    public freezeWorldMatrix(newWorldMatrix: Nullable<Matrix> = null, decompose = false): TransformNode {
         if (newWorldMatrix) {
-            this._worldMatrix = newWorldMatrix;
+            if (decompose) {
+                this._rotation.setAll(0);
+                this._rotationQuaternion = this._rotationQuaternion || Quaternion.Identity();
+                newWorldMatrix.decompose(this._scaling, this._rotationQuaternion, this._position);
+                this.computeWorldMatrix(true);
+            } else {
+                this._worldMatrix = newWorldMatrix;
+                this._absolutePosition.copyFromFloats(this._worldMatrix.m[12], this._worldMatrix.m[13], this._worldMatrix.m[14]);
+                this._afterComputeWorldMatrix();
+            }
         } else {
             this._isWorldMatrixFrozen = false;  // no guarantee world is not already frozen, switch off temporarily
             this.computeWorldMatrix(true);
@@ -474,7 +485,7 @@ export class TransformNode extends Node {
     }
 
     /**
-    * Retuns the mesh absolute position in the World.
+    * Returns the mesh absolute position in the World.
     * @returns a Vector3.
     */
     public getAbsolutePosition(): Vector3 {
@@ -562,7 +573,7 @@ export class TransformNode extends Node {
      * @param yawCor optional yaw (y-axis) correction in radians
      * @param pitchCor optional pitch (x-axis) correction in radians
      * @param rollCor optional roll (z-axis) correction in radians
-     * @param space the choosen space of the target
+     * @param space the chosen space of the target
      * @returns the TransformNode.
      */
     public lookAt(targetPoint: Vector3, yawCor: number = 0, pitchCor: number = 0, rollCor: number = 0, space: Space = Space.LOCAL): TransformNode {
@@ -1068,7 +1079,7 @@ export class TransformNode extends Node {
         // Parent
         if (parent && parent.getWorldMatrix) {
             if (force) {
-                parent.computeWorldMatrix();
+                parent.computeWorldMatrix(force);
             }
             if (useBillboardPath) {
                 if (this._transformToBoneReferal) {
@@ -1313,7 +1324,7 @@ export class TransformNode extends Node {
     /**
      * Returns a new TransformNode object parsed from the source provided.
      * @param parsedTransformNode is the source.
-     * @param scene the scne the object belongs to
+     * @param scene the scene the object belongs to
      * @param rootUrl is a string, it's the root URL to prefix the `delayLoadingFile` property with
      * @returns a new TransformNode object parsed from the source provided.
      */
@@ -1361,6 +1372,14 @@ export class TransformNode extends Node {
 
         // Remove from scene
         this.getScene().removeTransformNode(this);
+
+        if (this._parentContainer) {
+            const index = this._parentContainer.transformNodes.indexOf(this);
+            if (index > -1) {
+                this._parentContainer.transformNodes.splice(index, 1);
+            }
+            this._parentContainer = null;
+        }
 
         this.onAfterWorldMatrixUpdateObservable.clear();
 

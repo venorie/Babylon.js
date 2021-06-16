@@ -60,12 +60,17 @@ export class NodeEditor {
         if (options.customLoadObservable) {
             options.customLoadObservable.add(data => {
                 SerializationTools.Deserialize(data, globalState);
+                globalState.mode = options.nodeMaterial.mode;
                 globalState.onResetRequiredObservable.notifyObservers();
                 globalState.onBuiltObservable.notifyObservers();
             })
         }
 
         this._CurrentState = globalState;
+
+        globalState.hostWindow.addEventListener('beforeunload', () => {
+            globalState.onPopupClosedObservable.notifyObservers();
+        });
 
         // Close the popup window when the page is refreshed or scene is disposed
         var popupWindow = (Popup as any)["node-editor"];

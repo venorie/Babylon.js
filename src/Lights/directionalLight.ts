@@ -70,10 +70,58 @@ export class DirectionalLight extends ShadowLight {
     public autoCalcShadowZBounds = false;
 
     // Cache
+    @serialize("orthoLeft")
     private _orthoLeft = Number.MAX_VALUE;
+    @serialize("orthoRight")
     private _orthoRight = Number.MIN_VALUE;
+    @serialize("orthoTop")
     private _orthoTop = Number.MIN_VALUE;
+    @serialize("orthoBottom")
     private _orthoBottom = Number.MAX_VALUE;
+
+    /**
+     * Gets or sets the orthoLeft property used to build the light frustum
+     */
+    public get orthoLeft(): number {
+        return this._orthoLeft;
+    }
+
+    public set orthoLeft(left: number) {
+        this._orthoLeft = left;
+    }
+
+    /**
+     * Gets or sets the orthoRight property used to build the light frustum
+     */
+    public get orthoRight(): number {
+        return this._orthoRight;
+    }
+
+    public set orthoRight(right: number) {
+        this._orthoRight = right;
+    }
+
+    /**
+     * Gets or sets the orthoTop property used to build the light frustum
+     */
+    public get orthoTop(): number {
+        return this._orthoTop;
+    }
+
+    public set orthoTop(top: number) {
+        this._orthoTop = top;
+    }
+
+    /**
+     * Gets or sets the orthoBottom property used to build the light frustum
+     */
+    public get orthoBottom(): number {
+        return this._orthoBottom;
+    }
+
+    public set orthoBottom(bottom: number) {
+        this._orthoBottom = bottom;
+    }
 
     /**
      * Creates a DirectionalLight object in the scene, oriented towards the passed direction (Vector3).
@@ -203,9 +251,14 @@ export class DirectionalLight extends ShadowLight {
         var xOffset = this._orthoRight - this._orthoLeft;
         var yOffset = this._orthoTop - this._orthoBottom;
 
+        const minZ = this.shadowMinZ !== undefined ? this.shadowMinZ : activeCamera.minZ;
+        const maxZ = this.shadowMaxZ !== undefined ? this.shadowMaxZ : activeCamera.maxZ;
+
+        const useReverseDepthBuffer = this.getScene().getEngine().useReverseDepthBuffer;
+
         Matrix.OrthoOffCenterLHToRef(this._orthoLeft - xOffset * this.shadowOrthoScale, this._orthoRight + xOffset * this.shadowOrthoScale,
             this._orthoBottom - yOffset * this.shadowOrthoScale, this._orthoTop + yOffset * this.shadowOrthoScale,
-            this.shadowMinZ !== undefined ? this.shadowMinZ : activeCamera.minZ, this.shadowMaxZ !== undefined ? this.shadowMaxZ : activeCamera.maxZ, matrix);
+            useReverseDepthBuffer ? maxZ : minZ, useReverseDepthBuffer ? minZ : maxZ, matrix);
     }
 
     protected _buildUniformLayout(): void {

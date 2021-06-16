@@ -21,26 +21,75 @@ declare module "../../Engines/thinEngine" {
          * @see https://doc.babylonjs.com/features/webgl2#multiple-render-target
          * @param size defines the size of the texture
          * @param options defines the creation options
+         * @param initializeBuffers if set to true, the engine will make an initializing call of drawBuffers
          * @returns the cube texture as an InternalTexture
          */
-        createMultipleRenderTarget(size: any, options: IMultiRenderTargetOptions): InternalTexture[];
+        createMultipleRenderTarget(size: any, options: IMultiRenderTargetOptions, initializeBuffers?: boolean): InternalTexture[];
 
         /**
          * Update the sample count for a given multiple render target texture
          * @see https://doc.babylonjs.com/features/webgl2#multisample-render-targets
          * @param textures defines the textures to update
          * @param samples defines the sample count to set
+         * @param initializeBuffers if set to true, the engine will make an initializing call of drawBuffers
          * @returns the effective sample count (could be 0 if multisample render targets are not supported)
          */
-        updateMultipleRenderTargetTextureSampleCount(textures: Nullable<InternalTexture[]>, samples: number): number;
+        updateMultipleRenderTargetTextureSampleCount(textures: Nullable<InternalTexture[]>, samples: number, initializeBuffers?: boolean): number;
 
         /**
          * Select a subsets of attachments to draw to.
          * @param attachments gl attachments
          */
         bindAttachments(attachments: number[]) : void;
+
+        /**
+         * Creates a layout object to draw/clear on specific textures in a MRT
+         * @param textureStatus textureStatus[i] indicates if the i-th is active
+         * @returns A layout to be fed to the engine, calling `bindAttachments`.
+         */
+        buildTextureLayout(textureStatus: boolean[]) : number[];
+
+        /**
+         * Restores the webgl state to only draw on the main color attachment
+         * when the frame buffer associated is the canvas frame buffer
+         */
+        restoreSingleAttachment() : void;
+
+        /**
+         * Restores the webgl state to only draw on the main color attachment
+         * when the frame buffer associated is not the canvas frame buffer
+         */
+        restoreSingleAttachmentForRenderTarget() : void;
     }
 }
+
+ThinEngine.prototype.restoreSingleAttachment = function(): void {
+    const gl = this._gl;
+
+    this.bindAttachments([gl.BACK]);
+};
+
+ThinEngine.prototype.restoreSingleAttachmentForRenderTarget = function(): void {
+    const gl = this._gl;
+
+    this.bindAttachments([gl.COLOR_ATTACHMENT0]);
+};
+
+ThinEngine.prototype.buildTextureLayout = function(textureStatus: boolean[]): number[] {
+    const gl = this._gl;
+
+    const result = [];
+
+    for (let i = 0; i < textureStatus.length; i++) {
+        if (textureStatus[i]) {
+            result.push((<any>gl)["COLOR_ATTACHMENT" + i]);
+        } else {
+            result.push(gl.NONE);
+        }
+    }
+
+    return result;
+};
 
 ThinEngine.prototype.bindAttachments = function(attachments: number[]): void {
     const gl = this._gl;
@@ -104,7 +153,7 @@ ThinEngine.prototype.unBindMultiColorAttachmentFramebuffer = function(textures: 
     this._bindUnboundFramebuffer(null);
 };
 
-ThinEngine.prototype.createMultipleRenderTarget = function(size: any, options: IMultiRenderTargetOptions): InternalTexture[] {
+ThinEngine.prototype.createMultipleRenderTarget = function(size: any, options: IMultiRenderTargetOptions, initializeBuffers: boolean = true): InternalTexture[] {
     var generateMipMaps = false;
     var generateDepthBuffer = true;
     var generateStencilBuffer = false;
@@ -171,7 +220,7 @@ ThinEngine.prototype.createMultipleRenderTarget = function(size: any, options: I
         attachments.push(attachment);
 
         gl.activeTexture((<any>gl)["TEXTURE" + i]);
-        gl.bindTexture(gl.TEXTURE_2D, texture._webGLTexture);
+        gl.bindTexture(gl.TEXTURE_2D, texture._hardwareTexture!.underlyingResource);
 
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filters.mag);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filters.min);
@@ -180,7 +229,7 @@ ThinEngine.prototype.createMultipleRenderTarget = function(size: any, options: I
 
         gl.texImage2D(gl.TEXTURE_2D, 0, this._getRGBABufferInternalSizedFormat(type), width, height, 0, gl.RGBA, this._getWebGLTextureType(type), null);
 
-        gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, attachment, gl.TEXTURE_2D, texture._webGLTexture, 0);
+        gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, attachment, gl.TEXTURE_2D, texture._hardwareTexture!.underlyingResource, 0);
 
         if (generateMipMaps) {
             this._gl.generateMipmap(this._gl.TEXTURE_2D);
@@ -213,7 +262,7 @@ ThinEngine.prototype.createMultipleRenderTarget = function(size: any, options: I
         var depthTexture = new InternalTexture(this, InternalTextureSource.MultiRenderTarget);
 
         gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, depthTexture._webGLTexture);
+        gl.bindTexture(gl.TEXTURE_2D, depthTexture._hardwareTexture!.underlyingResource);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -234,7 +283,7 @@ ThinEngine.prototype.createMultipleRenderTarget = function(size: any, options: I
             gl.FRAMEBUFFER,
             gl.DEPTH_ATTACHMENT,
             gl.TEXTURE_2D,
-            depthTexture._webGLTexture,
+            depthTexture._hardwareTexture!.underlyingResource,
             0
         );
 
@@ -253,8 +302,10 @@ ThinEngine.prototype.createMultipleRenderTarget = function(size: any, options: I
         textures.push(depthTexture);
         this._internalTexturesCache.push(depthTexture);
     }
+    if (initializeBuffers) {
+        gl.drawBuffers(attachments);
+    }
 
-    gl.drawBuffers(attachments);
     this._bindUnboundFramebuffer(null);
 
     this.resetTextureCache();
@@ -262,7 +313,7 @@ ThinEngine.prototype.createMultipleRenderTarget = function(size: any, options: I
     return textures;
 };
 
-ThinEngine.prototype.updateMultipleRenderTargetTextureSampleCount = function(textures: Nullable<InternalTexture[]>, samples: number): number {
+ThinEngine.prototype.updateMultipleRenderTargetTextureSampleCount = function(textures: Nullable<InternalTexture[]>, samples: number, initializeBuffers: boolean = true): number {
     if (this.webGLVersion < 2 || !textures) {
         return 1;
     }
@@ -334,7 +385,9 @@ ThinEngine.prototype.updateMultipleRenderTargetTextureSampleCount = function(tex
             gl.bindRenderbuffer(gl.RENDERBUFFER, null);
             attachments.push(attachment);
         }
-        gl.drawBuffers(attachments);
+        if (initializeBuffers) {
+            gl.drawBuffers(attachments);
+        }
     } else {
         this._bindUnboundFramebuffer(textures[0]._framebuffer);
     }

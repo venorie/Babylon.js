@@ -1,6 +1,6 @@
 import { DracoCompression } from "babylonjs/Meshes/Compression/dracoCompression";
 import { Nullable } from "babylonjs/types";
-import { VertexBuffer } from "babylonjs/Meshes/buffer";
+import { VertexBuffer } from "babylonjs/Buffers/buffer";
 import { Geometry } from "babylonjs/Meshes/geometry";
 import { Mesh } from "babylonjs/Meshes/mesh";
 
@@ -45,7 +45,7 @@ export class KHR_draco_mesh_compression implements IGLTFLoaderExtension {
     /** @hidden */
     public dispose(): void {
         delete this.dracoCompression;
-        delete this._loader;
+        (this._loader as any) = null;
     }
 
     /** @hidden */
